@@ -307,9 +307,7 @@ export default function AdminDashboardPage() {
         setUploading(true);
         const fd = new FormData();
         fd.append('image', imageFile);
-        const uploadRes = await api.post('/admin/upload', fd, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
+        const uploadRes = await api.post('/admin/upload', fd);
         resolvedImageUrl = uploadRes.data.image_url;
         setUploading(false);
       }
