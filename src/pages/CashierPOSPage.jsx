@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
-import api from '../lib/api';
+import api, { getImageUrl } from '../lib/api';
 import * as XLSX from 'xlsx';
 import LineGraph from '../components/LineGraph';
 import PieGraph from '../components/PieGraph';
@@ -654,7 +654,7 @@ export default function CashierPOSPage() {
                         {/* Image Thumbnail */}
                         <div className="pos-card-img-wrap">
                           {p.image_url ? (
-                            <img src={p.image_url} alt={p.name} className="pos-card-img" />
+                            <img src={getImageUrl(p.image_url)} alt={p.name} className="pos-card-img" />
                           ) : (
                             <div className="pos-card-img-placeholder">
                               <Coffee size={24} color="#D4A96A" />

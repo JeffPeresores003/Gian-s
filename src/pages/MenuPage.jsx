@@ -8,7 +8,7 @@ import {
   CheckCircle2,
   CircleOff,
 } from 'lucide-react';
-import api from '../lib/api';
+import api, { getImageUrl } from '../lib/api';
 
 export default function MenuPage() {
   const [products, setProducts] = useState([]);
@@ -247,7 +247,7 @@ export default function MenuPage() {
                 <div className="product-image-wrap">
                   {product.image_url ? (
                     <img
-                      src={product.image_url}
+                      src={getImageUrl(product.image_url)}
                       alt={product.name}
                       loading="lazy"
                       onError={(e) => {

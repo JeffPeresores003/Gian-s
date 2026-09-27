@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
-import api from '../lib/api';
+import api, { getImageUrl } from '../lib/api';
 import * as XLSX from 'xlsx';
 import {
   Plus,
@@ -211,7 +211,7 @@ export default function AdminDashboardPage() {
       is_available: Boolean(product.is_available),
     });
     if (product.image_url) {
-      setImagePreview(product.image_url);
+      setImagePreview(getImageUrl(product.image_url));
       setUploadMode(product.image_url.startsWith('/uploads') ? 'file' : 'url');
     } else {
       resetImageState();
@@ -753,7 +753,7 @@ export default function AdminDashboardPage() {
                         <td>
                           {p.image_url ? (
                             <img
-                              src={p.image_url}
+                              src={getImageUrl(p.image_url)}
                               alt=""
                               className="product-thumb"
                               onError={(e) => {
@@ -1277,7 +1277,7 @@ export default function AdminDashboardPage() {
                       />
                       {imagePreview && !imagePreview.startsWith('http') ? (
                         <>
-                          <img src={imagePreview} alt="Preview" className="upload-preview" />
+                          <img src={getImageUrl(imagePreview)} alt="Preview" className="upload-preview" />
                           <div className="upload-preview-actions">
                             <span className="upload-preview-name">{imageFile?.name}</span>
                             <button
@@ -1306,7 +1306,7 @@ export default function AdminDashboardPage() {
                     {imagePreview && imagePreview.startsWith('http') && !imageFile && (
                       <div style={{ marginTop: '8px' }}>
                         <img
-                          src={imagePreview}
+                          src={getImageUrl(imagePreview)}
                           alt="Current product"
                           className="upload-preview"
                         />
@@ -1339,7 +1339,7 @@ export default function AdminDashboardPage() {
                     />
                     {formData.image_url && (
                       <img
-                        src={formData.image_url}
+                        src={getImageUrl(formData.image_url)}
                         alt="URL preview"
                         className="upload-preview"
                         style={{ marginTop: '8px' }}

@@ -6,6 +6,15 @@ const api = axios.create({
   timeout: 10000,
 });
 
+export const getImageUrl = (imageUrl) => {
+  if (!imageUrl || imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+    return imageUrl;
+  }
+
+  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+  return new URL(imageUrl, `${apiUrl}/`).toString();
+};
+
 // Response interceptor — handle 401 globally
 api.interceptors.response.use(
   (response) => response,
