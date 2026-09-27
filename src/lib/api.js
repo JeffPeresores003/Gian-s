@@ -8,7 +8,9 @@ const api = axios.create({
 
 export const getImageUrl = (imageUrl) => {
   if (!imageUrl || imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-    return imageUrl;
+    return imageUrl?.startsWith('http://') && window.location.protocol === 'https:'
+      ? imageUrl.replace(/^http:/, 'https:')
+      : imageUrl;
   }
 
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
