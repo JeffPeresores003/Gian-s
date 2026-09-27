@@ -59,6 +59,7 @@ export default function CashierPOSPage() {
   const [tenderedAmount, setTenderedAmount] = useState('');
   const [orderNotes, setOrderNotes] = useState('');
   const [submittingOrder, setSubmittingOrder] = useState(false);
+  const [discountActive, setDiscountActive] = useState(false); // 20% discount toggle
 
   // ---------- Completed Order Receipt Modal ----------
   const [completedOrder, setCompletedOrder] = useState(null);
@@ -198,9 +199,19 @@ export default function CashierPOSPage() {
   }, [products, selectedCategory, searchQuery]);
 
   // ---------- Cart Calculations ----------
-  const cartTotal = useMemo(() => {
+  const DISCOUNT_RATE = 0.20; // 20% off
+
+  const cartSubtotal = useMemo(() => {
     return cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   }, [cart]);
+
+  const discountAmount = useMemo(() => {
+    return discountActive ? cartSubtotal * DISCOUNT_RATE : 0;
+  }, [discountActive, cartSubtotal]);
+
+  const cartTotal = useMemo(() => {
+    return cartSubtotal - discountAmount;
+  }, [cartSubtotal, discountAmount]);
 
   const numTendered = parseFloat(tenderedAmount) || 0;
   const changeDue = Math.max(0, numTendered - cartTotal);
@@ -248,6 +259,7 @@ export default function CashierPOSPage() {
     setTenderedAmount('');
     setCustomerName('');
     setOrderNotes('');
+    setDiscountActive(false);
   };
 
   // Quick cash buttons
@@ -292,16 +304,18 @@ export default function CashierPOSPage() {
         customer_name: customerName.trim() || 'Guest',
         order_type: orderType,
         payment_method: paymentMethod,
-        total_amount: cartTotal,
+        total_amount: cartTotal, // already discounted if discountActive
         amount_paid: paymentMethod === 'cash' ? numTendered : cartTotal,
         change_amount: paymentMethod === 'cash' ? changeDue : 0,
-        notes: orderNotes.trim() || null,
+        notes: discountActive
+          ? `[20% Discount Applied] ${orderNotes.trim() || ''}`.trim()
+          : orderNotes.trim() || null,
         items: cart.map((item) => ({
           product_id: item.id,
           product_name: item.name,
-          unit_price: item.price,
+          unit_price: item.price,        // always original unit price
           quantity: item.quantity,
-          subtotal: item.price * item.quantity,
+          subtotal: item.price * item.quantity, // always original subtotal
         })),
       };
 
@@ -675,16 +689,30 @@ export default function CashierPOSPage() {
             <div className="pos-cart-header">
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <h3 className="pos-cart-title">Current Order</h3>
-                {cart.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {/* 20% Discount Toggle Button */}
                   <button
                     type="button"
-                    className="btn-pos-clear"
-                    onClick={clearCart}
-                    title="Clear order"
+                    className={`btn-discount-toggle ${discountActive ? 'active' : ''}`}
+                    onClick={() => setDiscountActive((prev) => !prev)}
+                    title={discountActive ? 'Click to remove 20% discount' : 'Click to apply 20% discount'}
+                    id="pos-discount-toggle-btn"
                   >
-                    Clear All
+                    <span className="discount-badge-text">20% OFF</span>
+                    {discountActive && <span className="discount-active-dot" />}
                   </button>
-                )}
+
+                  {cart.length > 0 && (
+                    <button
+                      type="button"
+                      className="btn-pos-clear"
+                      onClick={clearCart}
+                      title="Clear order"
+                    >
+                      Clear All
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Customer & Order Type */}
@@ -774,9 +802,25 @@ export default function CashierPOSPage() {
 
             {/* Total & Calculator Counter */}
             <div className="pos-cart-footer">
+              {/* Discount Summary Row */}
+              {discountActive && cart.length > 0 && (
+                <div className="pos-discount-summary">
+                  <div className="pos-discount-line">
+                    <span>Subtotal</span>
+                    <span>₱{cartSubtotal.toFixed(2)}</span>
+                  </div>
+                  <div className="pos-discount-line discount-row">
+                    <span>🏷️ 20% Discount</span>
+                    <span className="discount-save-amount">-₱{discountAmount.toFixed(2)}</span>
+                  </div>
+                </div>
+              )}
+
               <div className="pos-summary-row pos-total-row">
                 <span>Total Amount</span>
-                <span className="pos-total-amount">₱{cartTotal.toFixed(2)}</span>
+                <span className={`pos-total-amount ${discountActive ? 'total-discounted' : ''}`}>
+                  ₱{cartTotal.toFixed(2)}
+                </span>
               </div>
 
               {/* Payment Method Selector */}
@@ -1383,6 +1427,25 @@ export default function CashierPOSPage() {
                     <div className="receipt-divider">- - - - - - - - - - - - - - - - - - - -</div>
 
                     <div className="receipt-totals">
+                      {/* Show discount line on receipt for fresh orders */}
+                      {completedOrder && discountActive && (
+                        <>
+                          <div className="receipt-total-row">
+                            <span>Subtotal:</span>
+                            <span>₱{cartSubtotal.toFixed(2)}</span>
+                          </div>
+                          <div className="receipt-total-row" style={{ color: '#16a34a', fontWeight: 700 }}>
+                            <span>20% Discount:</span>
+                            <span>-₱{discountAmount.toFixed(2)}</span>
+                          </div>
+                        </>
+                      )}
+                      {/* Show discount note from history receipts */}
+                      {viewingReceiptOrder && order.notes?.includes('[20% Discount Applied]') && (
+                        <div className="receipt-total-row" style={{ color: '#16a34a', fontSize: '0.78rem' }}>
+                          <span>🏷️ 20% Discount was applied</span>
+                        </div>
+                      )}
                       <div className="receipt-total-row final">
                         <span>TOTAL DUE:</span>
                         <span>₱{Number(order.total_amount).toFixed(2)}</span>
