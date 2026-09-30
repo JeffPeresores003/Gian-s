@@ -9,6 +9,9 @@ import AdminDashboardPage from './pages/AdminDashboardPage';
 import CashierPOSPage from './pages/CashierPOSPage';
 import NotFoundPage from './pages/NotFoundPage';
 import ProtectedRoute from './components/ProtectedRoute';
+import OrderingPage from './pages/OrderingPage';
+import TrackOrderPage from './pages/TrackOrderPage';
+import RiderPage from './pages/RiderPage';
 
 function PublicLayout() {
   return (
@@ -45,9 +48,10 @@ export default function App() {
         <Route path="*" element={<NotFoundPage />} />
       </Route>
 
-      {/* Menu page — no footer */}
       <Route element={<PublicLayoutNoFooter />}>
         <Route path="/menu" element={<MenuPage />} />
+        <Route path="/order" element={<Navigate to="/menu" replace />} />
+        <Route path="/track" element={<TrackOrderPage />} />
       </Route>
 
 
@@ -75,6 +79,16 @@ export default function App() {
         }
       />
       <Route path="/cashier" element={<Navigate to="/cashier/pos" replace />} />
+
+      {/* Protected Rider Delivery Portal */}
+      <Route
+        path="/rider"
+        element={
+          <ProtectedRoute allowedRoles={['rider', 'admin']}>
+            <RiderPage />
+          </ProtectedRoute>
+        }
+      />
     </Routes>
   );
 }

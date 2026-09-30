@@ -22,11 +22,9 @@ export default function ProtectedRoute({ children, allowedRoles = [] }) {
 
   // Check role restrictions if specified
   if (allowedRoles.length > 0 && !allowedRoles.includes(user.role)) {
-    // If cashier tries to go to admin-only area, redirect to cashier POS
-    if (user.role === 'cashier') {
-      return <Navigate to="/cashier/pos" replace />;
-    }
-    // If other mismatch, redirect to dashboard
+    // Redirect to role-appropriate home
+    if (user.role === 'cashier') return <Navigate to="/cashier/pos" replace />;
+    if (user.role === 'rider')   return <Navigate to="/rider" replace />;
     return <Navigate to="/admin/dashboard" replace />;
   }
 

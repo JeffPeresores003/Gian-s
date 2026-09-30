@@ -10,6 +10,9 @@ import {
   ArrowRight,
   ShieldCheck,
   ChevronRight,
+  ShoppingBag,
+  Package,
+  Search,
 } from 'lucide-react';
 
 /* ── Intersection-Observer scroll-reveal hook ── */
@@ -105,9 +108,10 @@ export default function LandingPage() {
                 <ArrowRight size={18} />
               </Link>
 
-              <a href="#highlights" className="btn-secondary" id="hero-our-story-btn">
-                <span>Our Story</span>
-              </a>
+              <Link to="/menu" className="btn-primary hero-order-btn" id="hero-order-online-btn">
+                <ShoppingBag size={18} />
+                <span>Order Online</span>
+              </Link>
             </div>
           </div>
 
@@ -205,7 +209,7 @@ export default function LandingPage() {
                 <h3 className="font-serif" style={{ fontSize: '1.4rem', marginBottom: '12px', color: '#fff' }}>
                   Browse our Digital Menu
                 </h3>
-                <p style={{ fontSize: '0.875rem', opacity: 0.85, lineHeight: 1.6, marginBottom: '24px' }}>
+                <p style={{ fontSize: '0.875rem', opacity: 0.85, lineHeight: 1.6, marginBottom: '20px' }}>
                   Explore all current roast variations, seasonal cold brews, and freshly prepared bites in real-time.
                 </p>
                 <Link
@@ -215,11 +219,22 @@ export default function LandingPage() {
                     background: '#FAF7F2',
                     color: '#2C1810',
                     justifyContent: 'center',
+                    marginBottom: '12px',
                   }}
                   id="hours-explore-menu-btn"
                 >
                   <span>Open Directory</span>
                   <ChevronRight size={18} />
+                </Link>
+
+                <Link
+                  to="/menu"
+                  className="btn-primary"
+                  style={{ justifyContent: 'center' }}
+                  id="hours-order-online-btn"
+                >
+                  <ShoppingBag size={16} />
+                  <span>Order Online</span>
                 </Link>
               </div>
             </div>

@@ -1,5 +1,5 @@
 import { Link, NavLink } from 'react-router-dom';
-import { BookOpen } from 'lucide-react';
+import { BookOpen, Search } from 'lucide-react';
 
 export default function Navbar() {
   return (
@@ -23,7 +23,7 @@ export default function Navbar() {
           <span className="nav-logo-text">Gian&apos;s</span>
         </Link>
 
-        {/* Right Side: Menu Button */}
+        {/* Right Side: Nav Actions */}
         <div className="nav-actions">
           <NavLink
             to="/menu"
@@ -32,6 +32,15 @@ export default function Navbar() {
           >
             <BookOpen size={15} />
             <span>Menu</span>
+          </NavLink>
+
+          <NavLink
+            to="/track"
+            className={({ isActive }) => `btn-nav-menu${isActive ? ' active' : ''}`}
+            id="nav-track-link"
+          >
+            <Search size={15} />
+            <span>Track Order</span>
           </NavLink>
         </div>
       </div>

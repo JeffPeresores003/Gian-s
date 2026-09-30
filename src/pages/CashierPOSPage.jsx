@@ -24,6 +24,8 @@ import {
   Banknote,
   Smartphone,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   ExternalLink,
   Calculator as CalcIcon,
   RefreshCw,
@@ -35,6 +37,10 @@ import {
   Download,
   PieChart as PieIcon,
   Activity,
+  Package,
+  AlertCircle,
+  MapPin,
+  Phone,
 } from 'lucide-react';
 
 export default function CashierPOSPage() {
@@ -42,8 +48,23 @@ export default function CashierPOSPage() {
   const { addToast } = useToast();
   const navigate = useNavigate();
 
-  // Active top navigation tab: 'pos' | 'history' | 'reports'
+  // Active top navigation tab: 'pos' | 'history' | 'reports' | 'online'
   const [activeTab, setActiveTab] = useState('pos');
+
+  // ---------- Online Orders State ----------
+  const [onlineSubTab, setOnlineSubTab] = useState('pending'); // 'pending' | 'history'
+  const [pendingOrders, setPendingOrders] = useState([]);
+  const [loadingPendingOrders, setLoadingPendingOrders] = useState(false);
+  const [pendingSearch, setPendingSearch] = useState('');
+  const [onlineHistoryOrders, setOnlineHistoryOrders] = useState([]);
+  const [loadingOnlineHistory, setLoadingOnlineHistory] = useState(false);
+  const [onlineHistorySearch, setOnlineHistorySearch] = useState('');
+  const [onlineHistoryDate, setOnlineHistoryDate] = useState('');
+  const [addonModalOrder, setAddonModalOrder] = useState(null);
+  const [selectedAddonProduct, setSelectedAddonProduct] = useState('');
+  const [addonQuantity, setAddonQuantity] = useState(1);
+  const [submittingAddon, setSubmittingAddon] = useState(false);
+  const [actionLoadingId, setActionLoadingId] = useState(null);
 
   // ---------- Catalog & Menu State ----------
   const [products, setProducts] = useState([]);
@@ -60,6 +81,7 @@ export default function CashierPOSPage() {
   const [orderNotes, setOrderNotes] = useState('');
   const [submittingOrder, setSubmittingOrder] = useState(false);
   const [discountActive, setDiscountActive] = useState(false); // 20% discount toggle
+  const [showCalculator, setShowCalculator] = useState(false); // Collapsible on-screen keypad
 
   // ---------- Completed Order Receipt Modal ----------
   const [completedOrder, setCompletedOrder] = useState(null);
@@ -392,6 +414,115 @@ export default function CashierPOSPage() {
     }
   }, [activeTab, reportDate]);
 
+  // ---------- Online Orders Handlers ----------
+  const fetchPendingOrders = async () => {
+    setLoadingPendingOrders(true);
+    try {
+      const params = {};
+      if (pendingSearch.trim()) params.search = pendingSearch.trim();
+      const res = await api.get('/online-orders/pending', { params });
+      setPendingOrders(res.data?.orders || []);
+    } catch {
+      // quiet fail on background polling
+    } finally {
+      setLoadingPendingOrders(false);
+    }
+  };
+
+  const fetchOnlineOrderHistory = async () => {
+    setLoadingOnlineHistory(true);
+    try {
+      const params = {};
+      if (onlineHistoryDate) params.date = onlineHistoryDate;
+      if (onlineHistorySearch.trim()) params.search = onlineHistorySearch.trim();
+      const res = await api.get('/online-orders/history', { params });
+      setOnlineHistoryOrders(res.data?.orders || []);
+    } catch {
+      addToast('Failed to load online order history.', 'error');
+    } finally {
+      setLoadingOnlineHistory(false);
+    }
+  };
+
+  const handleConfirmOnlineOrder = async (orderId) => {
+    setActionLoadingId(orderId);
+    try {
+      await api.post(`/online-orders/${orderId}/confirm`, {
+        payment_method: 'cash',
+      });
+      addToast('Online order confirmed and approved for rider delivery!', 'success');
+      fetchPendingOrders();
+    } catch (err) {
+      addToast(err.response?.data?.message || 'Failed to confirm order.', 'error');
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const handleCancelOnlineOrder = async (orderId) => {
+    if (!window.confirm('Are you sure you want to cancel this online order?')) return;
+    setActionLoadingId(orderId);
+    try {
+      await api.post(`/online-orders/${orderId}/cancel-cashier`);
+      addToast('Order has been cancelled.', 'info');
+      fetchPendingOrders();
+    } catch (err) {
+      addToast(err.response?.data?.message || 'Failed to cancel order.', 'error');
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const handleAddUpdatedItem = async (e) => {
+    e.preventDefault();
+    if (!addonModalOrder || !selectedAddonProduct) return;
+    const prod = products.find((p) => p.id === parseInt(selectedAddonProduct, 10));
+    if (!prod) return;
+
+    setSubmittingAddon(true);
+    try {
+      await api.post(`/online-orders/${addonModalOrder.id}/update-item`, {
+        product_id: prod.id,
+        product_name: prod.name,
+        unit_price: prod.price,
+        quantity: addonQuantity,
+      });
+      addToast(`Added ${addonQuantity}x "${prod.name}" as add-on!`, 'success');
+      setAddonModalOrder(null);
+      setSelectedAddonProduct('');
+      setAddonQuantity(1);
+      fetchPendingOrders();
+    } catch (err) {
+      addToast(err.response?.data?.message || 'Failed to add item.', 'error');
+    } finally {
+      setSubmittingAddon(false);
+    }
+  };
+
+  const viewOnlineReceipt = async (orderId) => {
+    try {
+      const res = await api.get(`/online-orders/${orderId}/receipt`);
+      setViewingReceiptOrder(res.data?.order);
+    } catch {
+      addToast('Failed to fetch online order receipt.', 'error');
+    }
+  };
+
+  useEffect(() => {
+    fetchPendingOrders();
+    const interval = setInterval(() => {
+      fetchPendingOrders();
+    }, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'online') {
+      if (onlineSubTab === 'pending') fetchPendingOrders();
+      if (onlineSubTab === 'history') fetchOnlineOrderHistory();
+    }
+  }, [activeTab, onlineSubTab, onlineHistoryDate]);
+
   const handleLogout = async () => {
     await logout();
     addToast('Logged out of counter session.', 'info');
@@ -485,7 +616,7 @@ export default function CashierPOSPage() {
   };
 
   return (
-    <div className="pos-layout">
+    <div className={`pos-layout ${activeTab === 'pos' ? 'pos-active-workspace' : ''}`}>
       {/* ─── Top Header / Navigation ─────────────────────────── */}
       <header className="pos-navbar">
         <div className="pos-nav-left">
@@ -535,6 +666,32 @@ export default function CashierPOSPage() {
             >
               <TrendingUp size={16} />
               <span>Sales Reports</span>
+            </button>
+            <button
+              type="button"
+              className={`pos-tab-btn ${activeTab === 'online' ? 'active' : ''}`}
+              onClick={() => setActiveTab('online')}
+              id="pos-tab-online"
+              style={{ position: 'relative' }}
+            >
+              <Package size={16} />
+              <span>Online Orders</span>
+              {pendingOrders.length > 0 && (
+                <span
+                  style={{
+                    marginLeft: '6px',
+                    background: '#e11d48',
+                    color: '#fff',
+                    borderRadius: '10px',
+                    fontSize: '0.7rem',
+                    fontWeight: 700,
+                    padding: '1px 6px',
+                    display: 'inline-block',
+                  }}
+                >
+                  {pendingOrders.length}
+                </span>
+              )}
             </button>
           </nav>
         </div>
@@ -858,7 +1015,20 @@ export default function CashierPOSPage() {
               {paymentMethod === 'cash' && (
                 <div className="pos-calculator-box">
                   <div className="pos-tender-input-wrap">
-                    <label className="pos-tender-label">Cash Tendered (₱):</label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <label className="pos-tender-label" style={{ margin: 0 }}>Cash (₱):</label>
+                      <button
+                        type="button"
+                        className={`btn-toggle-keypad ${showCalculator ? 'active' : ''}`}
+                        onClick={() => setShowCalculator((prev) => !prev)}
+                        id="pos-toggle-keypad-btn"
+                        title={showCalculator ? 'Hide calculator keypad to see all ordered products' : 'Show calculator keypad'}
+                      >
+                        <CalcIcon size={12} />
+                        <span>{showCalculator ? 'Hide Keypad' : 'Keypad'}</span>
+                        {showCalculator ? <ChevronDown size={11} /> : <ChevronUp size={11} />}
+                      </button>
+                    </div>
                     <input
                       type="number"
                       step="any"
@@ -871,29 +1041,32 @@ export default function CashierPOSPage() {
                     />
                   </div>
 
-                  {/* Fast Tender Buttons */}
-                  <div className="pos-quick-cash-row">
-                    <button type="button" onClick={() => setQuickCash('exact')}>Exact</button>
-                    <button type="button" onClick={() => setQuickCash(50)}>₱50</button>
-                    <button type="button" onClick={() => setQuickCash(100)}>₱100</button>
-                    <button type="button" onClick={() => setQuickCash(200)}>₱200</button>
-                    <button type="button" onClick={() => setQuickCash(500)}>₱500</button>
-                    <button type="button" onClick={() => setQuickCash(1000)}>₱1000</button>
-                  </div>
+                  {/* Fast Tender Buttons & Calculator Keypad (Collapsible) */}
+                  {showCalculator && (
+                    <>
+                      <div className="pos-quick-cash-row">
+                        <button type="button" onClick={() => setQuickCash('exact')}>Exact</button>
+                        <button type="button" onClick={() => setQuickCash(50)}>₱50</button>
+                        <button type="button" onClick={() => setQuickCash(100)}>₱100</button>
+                        <button type="button" onClick={() => setQuickCash(200)}>₱200</button>
+                        <button type="button" onClick={() => setQuickCash(500)}>₱500</button>
+                        <button type="button" onClick={() => setQuickCash(1000)}>₱1000</button>
+                      </div>
 
-                  {/* On-Screen Numerical Pad / Calculator */}
-                  <div className="pos-num-pad">
-                    {['7', '8', '9', '4', '5', '6', '1', '2', '3', '0', '.', 'C'].map((k) => (
-                      <button
-                        key={k}
-                        type="button"
-                        className="pos-pad-btn"
-                        onClick={() => appendKeypad(k)}
-                      >
-                        {k}
-                      </button>
-                    ))}
-                  </div>
+                      <div className="pos-num-pad">
+                        {['7', '8', '9', '4', '5', '6', '1', '2', '3', '0', '.', 'C'].map((k) => (
+                          <button
+                            key={k}
+                            type="button"
+                            className="pos-pad-btn"
+                            onClick={() => appendKeypad(k)}
+                          >
+                            {k}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
 
                   {/* Real-time Change or Shortfall Display */}
                   <div className="pos-change-banner">
@@ -1352,6 +1525,497 @@ export default function CashierPOSPage() {
         </div>
       )}
 
+      {/* ─── TAB 4: ONLINE ORDERS (PENDING & HISTORY) ───────── */}
+      {activeTab === 'online' && (
+        <div className="pos-history-container">
+          <div className="pos-history-top" style={{ flexWrap: 'wrap', gap: '16px' }}>
+            <div>
+              <h2 className="pos-section-title">Online Orders Management</h2>
+              <p className="pos-section-sub">
+                Approve pending orders, upsale additional items, and review delivery history
+              </p>
+            </div>
+
+            {/* Sub-tabs pills */}
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <button
+                type="button"
+                className={`pos-pill ${onlineSubTab === 'pending' ? 'active' : ''}`}
+                onClick={() => setOnlineSubTab('pending')}
+                style={{ padding: '8px 16px', fontSize: '0.85rem' }}
+                id="pos-online-subtab-pending"
+              >
+                <span>Pending Orders</span>
+                {pendingOrders.length > 0 && (
+                  <span
+                    style={{
+                      marginLeft: '6px',
+                      background: '#e11d48',
+                      color: '#fff',
+                      borderRadius: '8px',
+                      padding: '1px 6px',
+                      fontSize: '0.72rem',
+                    }}
+                  >
+                    {pendingOrders.length}
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                className={`pos-pill ${onlineSubTab === 'history' ? 'active' : ''}`}
+                onClick={() => setOnlineSubTab('history')}
+                style={{ padding: '8px 16px', fontSize: '0.85rem' }}
+                id="pos-online-subtab-history"
+              >
+                <span>Online Order History</span>
+              </button>
+            </div>
+          </div>
+
+          {/* ── Sub-tab 1: Pending Orders ── */}
+          {onlineSubTab === 'pending' && (
+            <>
+              <div className="pos-history-search-row" style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
+                <div className="search-wrap" style={{ maxWidth: '420px', flex: 1 }}>
+                  <Search className="search-icon" size={16} />
+                  <input
+                    type="text"
+                    className="search-input"
+                    placeholder="Search pending by OTN, customer name, contact..."
+                    value={pendingSearch}
+                    onChange={(e) => setPendingSearch(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && fetchPendingOrders()}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="btn-pos-aux"
+                  onClick={fetchPendingOrders}
+                  title="Refresh pending orders"
+                >
+                  <RefreshCw size={14} /> Refresh
+                </button>
+              </div>
+
+              <div className="pos-table-card">
+                {loadingPendingOrders ? (
+                  <div className="state-center" style={{ minHeight: '280px' }}>
+                    <Loader2 className="spinner" size={28} />
+                    <p className="state-sub">Loading pending online orders...</p>
+                  </div>
+                ) : pendingOrders.length === 0 ? (
+                  <div className="state-center" style={{ minHeight: '280px' }}>
+                    <Package size={40} className="state-icon" />
+                    <div className="state-title">No pending orders</div>
+                    <p className="state-sub">All online orders have been processed or confirmed.</p>
+                  </div>
+                ) : (
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th>OTN / Time</th>
+                        <th>Customer</th>
+                        <th>Delivery Address</th>
+                        <th>Items</th>
+                        <th>Notes</th>
+                        <th>Total</th>
+                        <th style={{ textAlign: 'right' }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pendingOrders.map((ord) => {
+                        const timeStr = new Date(ord.created_at).toLocaleTimeString('en-US', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        });
+                        const isLoading = actionLoadingId === ord.id;
+
+                        return (
+                          <tr key={ord.id}>
+                            <td>
+                              <div style={{ fontWeight: 600, fontFamily: 'monospace', color: 'var(--color-brand)' }}>
+                                {ord.order_number}
+                              </div>
+                              <div style={{ fontSize: '0.78rem', color: '#8C7A6B' }}>{timeStr}</div>
+                            </td>
+                            <td>
+                              <div style={{ fontWeight: 600 }}>{ord.customer_name}</div>
+                              <div style={{ fontSize: '0.78rem', color: '#666', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <Phone size={11} /> {ord.contact_number}
+                              </div>
+                            </td>
+                            <td>
+                              <div style={{ maxWidth: '240px', fontSize: '0.85rem', lineHeight: 1.4 }}>
+                                {ord.delivery_address}
+                              </div>
+                            </td>
+                            <td>
+                              <span style={{ fontWeight: 600 }}>{ord.item_count} items</span>
+                              {Boolean(ord.updated_item_count) && (
+                                <div style={{ fontSize: '0.75rem', color: '#C8873A', fontWeight: 700 }}>
+                                  +{ord.updated_item_count} upsale(s)
+                                </div>
+                              )}
+                            </td>
+                            <td>
+                              <div style={{ maxWidth: '180px', fontSize: '0.8rem', color: ord.notes ? '#333' : '#999', fontStyle: ord.notes ? 'normal' : 'italic' }}>
+                                {ord.notes || 'None'}
+                              </div>
+                            </td>
+                            <td>
+                              <strong style={{ fontSize: '1rem', color: 'var(--color-brand)' }}>
+                                ₱{Number(ord.total_amount).toFixed(2)}
+                              </strong>
+                            </td>
+                            <td style={{ textAlign: 'right' }}>
+                              <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
+                                {/* Confirm Button */}
+                                <button
+                                  type="button"
+                                  className="btn-save"
+                                  style={{ padding: '6px 12px', fontSize: '0.8rem' }}
+                                  disabled={isLoading}
+                                  onClick={() => handleConfirmOnlineOrder(ord.id)}
+                                  title="Approve order for delivery"
+                                >
+                                  {isLoading ? <Loader2 className="spinner" size={12} /> : <CheckCircle2 size={13} />}
+                                  <span>Confirm</span>
+                                </button>
+
+                                {/* Upsale Button */}
+                                <button
+                                  type="button"
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '5px',
+                                    padding: '6px 12px',
+                                    fontSize: '0.8rem',
+                                    fontWeight: 700,
+                                    background: 'linear-gradient(135deg, #C8873A, #D4A96A)',
+                                    color: '#fff',
+                                    border: 'none',
+                                    borderRadius: '7px',
+                                    cursor: 'pointer',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                  onClick={() => {
+                                    setAddonModalOrder(ord);
+                                    setSelectedAddonProduct('');
+                                    setAddonQuantity(1);
+                                  }}
+                                  title="Upsale — add extra products to this order"
+                                >
+                                  <Plus size={13} />
+                                  <span>Upsale</span>
+                                </button>
+
+                                {/* Receipt Button */}
+                                <button
+                                  type="button"
+                                  className="btn-receipt-view"
+                                  style={{ padding: '6px 10px', fontSize: '0.8rem' }}
+                                  onClick={() => viewOnlineReceipt(ord.id)}
+                                  title="View order receipt"
+                                >
+                                  <Printer size={13} />
+                                </button>
+
+                                {/* Cancel Button */}
+                                <button
+                                  type="button"
+                                  className="btn-delete"
+                                  style={{ padding: '6px 10px', fontSize: '0.8rem', background: 'transparent', border: '1px solid #dc3232', color: '#dc3232' }}
+                                  disabled={isLoading}
+                                  onClick={() => handleCancelOnlineOrder(ord.id)}
+                                  title="Cancel order"
+                                >
+                                  <X size={13} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* ── Sub-tab 2: Online Order History ── */}
+          {onlineSubTab === 'history' && (
+            <>
+              <div className="pos-history-top" style={{ marginTop: '4px' }}>
+                <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Calendar size={16} color="#8C7A6B" />
+                    <input
+                      type="date"
+                      className="pos-date-picker"
+                      value={onlineHistoryDate}
+                      onChange={(e) => setOnlineHistoryDate(e.target.value)}
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    className="btn-pos-aux"
+                    onClick={fetchOnlineOrderHistory}
+                    title="Refresh history"
+                  >
+                    <RefreshCw size={14} /> Refresh
+                  </button>
+                </div>
+
+                <div className="search-wrap" style={{ maxWidth: '350px' }}>
+                  <Search className="search-icon" size={16} />
+                  <input
+                    type="text"
+                    className="search-input"
+                    placeholder="Search OTN or customer..."
+                    value={onlineHistorySearch}
+                    onChange={(e) => setOnlineHistorySearch(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && fetchOnlineOrderHistory()}
+                  />
+                </div>
+              </div>
+
+              <div className="pos-table-card">
+                {loadingOnlineHistory ? (
+                  <div className="state-center" style={{ minHeight: '300px' }}>
+                    <Loader2 className="spinner" size={28} />
+                    <p className="state-sub">Loading online order history...</p>
+                  </div>
+                ) : onlineHistoryOrders.length === 0 ? (
+                  <div className="state-center" style={{ minHeight: '300px' }}>
+                    <Package size={40} className="state-icon" />
+                    <div className="state-title">No online orders found</div>
+                    <p className="state-sub">No confirmed or completed orders matching the filter.</p>
+                  </div>
+                ) : (
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th>OTN</th>
+                        <th>Date &amp; Time</th>
+                        <th>Customer</th>
+                        <th>Address</th>
+                        <th>Status</th>
+                        <th>Rider</th>
+                        <th>Total</th>
+                        <th>Cashier</th>
+                        <th style={{ textAlign: 'right' }}>Receipt</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {onlineHistoryOrders.map((ord) => {
+                        const dateStr = new Date(ord.created_at).toLocaleString('en-US', {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        });
+
+                        const statusBadgeStyle = {
+                          confirmed: { bg: '#e0f2fe', color: '#0369a1', text: 'Confirmed' },
+                          to_deliver: { bg: '#fef3c7', color: '#b45309', text: 'On the Way' },
+                          delivered: { bg: '#dcfce7', color: '#15803d', text: 'Delivered' },
+                          cancelled: { bg: '#fee2e2', color: '#b91c1c', text: 'Cancelled' },
+                        }[ord.status] || { bg: '#f3f4f6', color: '#4b5563', text: ord.status };
+
+                        return (
+                          <tr key={ord.id}>
+                            <td>
+                              <span style={{ fontWeight: 600, fontFamily: 'monospace', color: 'var(--color-brand)' }}>
+                                {ord.order_number}
+                              </span>
+                            </td>
+                            <td style={{ fontSize: '0.82rem' }}>{dateStr}</td>
+                            <td>
+                              <div style={{ fontWeight: 600 }}>{ord.customer_name}</div>
+                              <div style={{ fontSize: '0.75rem', color: '#666' }}>{ord.contact_number}</div>
+                            </td>
+                            <td style={{ maxWidth: '200px', fontSize: '0.82rem' }}>
+                              {ord.delivery_address}
+                            </td>
+                            <td>
+                              <span
+                                style={{
+                                  display: 'inline-block',
+                                  padding: '3px 9px',
+                                  borderRadius: '12px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: 600,
+                                  background: statusBadgeStyle.bg,
+                                  color: statusBadgeStyle.color,
+                                }}
+                              >
+                                {statusBadgeStyle.text}
+                              </span>
+                            </td>
+                            <td>
+                              <span style={{ fontSize: '0.85rem' }}>{ord.rider_name || '—'}</span>
+                            </td>
+                            <td>
+                              <strong>₱{Number(ord.total_amount).toFixed(2)}</strong>
+                            </td>
+                            <td style={{ fontSize: '0.85rem' }}>{ord.cashier_name || '—'}</td>
+                            <td style={{ textAlign: 'right' }}>
+                              <button
+                                type="button"
+                                className="btn-receipt-view"
+                                onClick={() => viewOnlineReceipt(ord.id)}
+                              >
+                                <Printer size={13} />
+                                <span>Receipt</span>
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ─── ADD-ON / UPSELL MODAL ──────────────────────────── */}
+      {addonModalOrder && (
+        <div className="modal-overlay" onClick={() => setAddonModalOrder(null)}>
+          <div className="modal-card" style={{ maxWidth: '440px' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.15rem', color: 'var(--color-brand)' }}>
+                  Upsale Product to Order
+                </h3>
+                <p style={{ margin: '4px 0 0 0', fontSize: '0.82rem', color: '#8C7A6B' }}>
+                  {addonModalOrder.order_number} &bull; {addonModalOrder.customer_name}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAddonModalOrder(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}
+              >
+                <X size={18} color="#8C7A6B" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddUpdatedItem}>
+              <div style={{ marginBottom: '14px' }}>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '6px' }}>
+                  Select Menu Product *
+                </label>
+                <select
+                  className="search-input"
+                  style={{ width: '100%' }}
+                  value={selectedAddonProduct}
+                  onChange={(e) => setSelectedAddonProduct(e.target.value)}
+                  required
+                >
+                  <option value="">-- Choose item from menu --</option>
+                  {products
+                    .filter((p) => p.is_available)
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} — ₱{Number(p.price).toFixed(2)} ({p.category})
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '6px' }}>
+                  Quantity
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <button
+                    type="button"
+                    className="btn-pos-aux"
+                    style={{ width: '36px', height: '36px', padding: 0, justifyContent: 'center' }}
+                    onClick={() => setAddonQuantity((q) => Math.max(1, q - 1))}
+                  >
+                    <Minus size={14} />
+                  </button>
+                  <input
+                    type="number"
+                    min="1"
+                    className="search-input"
+                    style={{ width: '70px', textAlign: 'center' }}
+                    value={addonQuantity}
+                    onChange={(e) => setAddonQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                  />
+                  <button
+                    type="button"
+                    className="btn-pos-aux"
+                    style={{ width: '36px', height: '36px', padding: 0, justifyContent: 'center' }}
+                    onClick={() => setAddonQuantity((q) => q + 1)}
+                  >
+                    <Plus size={14} />
+                  </button>
+                </div>
+              </div>
+
+              {selectedAddonProduct && (() => {
+                const prod = products.find((p) => p.id === parseInt(selectedAddonProduct, 10));
+                if (!prod) return null;
+                const addition = prod.price * addonQuantity;
+                const newTotal = Number(addonModalOrder.total_amount) + addition;
+
+                return (
+                  <div
+                    style={{
+                      background: '#FAF7F2',
+                      border: '1px solid #E5DCD0',
+                      borderRadius: '8px',
+                      padding: '12px',
+                      marginBottom: '20px',
+                      fontSize: '0.85rem',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                      <span>Upsale Subtotal:</span>
+                      <strong>+₱{addition.toFixed(2)}</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--color-brand)', fontWeight: 700 }}>
+                      <span>Updated Order Total:</span>
+                      <span>₱{newTotal.toFixed(2)}</span>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  className="btn-pos-aux"
+                  onClick={() => setAddonModalOrder(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-save"
+                  disabled={submittingAddon || !selectedAddonProduct}
+                >
+                  {submittingAddon ? (
+                    <><Loader2 className="spinner" size={14} /> Adding...</>
+                  ) : (
+                    <><Plus size={14} /> Add to Order</>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* ─── RECEIPT POPUP MODAL (After Checkout or from History) ─── */}
       {(showReceiptModal && completedOrder) || viewingReceiptOrder ? (
         <div
@@ -1400,7 +2064,23 @@ export default function CashierPOSPage() {
                       <div><span>Order #:</span> <strong>{order.order_number}</strong></div>
                       <div><span>Date:</span> {dateStr}</div>
                       <div><span>Customer:</span> {order.customer_name || 'Guest'}</div>
-                      <div><span>Type:</span> {order.order_type === 'dine-in' ? 'DINE IN' : 'TAKE OUT'}</div>
+                      <div>
+                        <span>Type:</span>{' '}
+                        {order.order_type === 'dine-in'
+                          ? 'DINE IN'
+                          : order.order_type === 'online'
+                          ? 'ONLINE DELIVERY'
+                          : 'TAKE OUT'}
+                      </div>
+                      {order.delivery_address && (
+                        <div><span>Address:</span> {order.delivery_address}</div>
+                      )}
+                      {order.contact_number && (
+                        <div><span>Contact:</span> {order.contact_number}</div>
+                      )}
+                      {order.rider_name && (
+                        <div><span>Rider:</span> {order.rider_name}</div>
+                      )}
                       <div><span>Cashier:</span> {order.cashier_name || user?.username}</div>
                     </div>
 
@@ -1415,7 +2095,14 @@ export default function CashierPOSPage() {
 
                       {order.items?.map((item, idx) => (
                         <div key={idx} className="receipt-item-row">
-                          <span className="receipt-item-title">{item.name || item.product_name}</span>
+                          <span className="receipt-item-title">
+                            {item.name || item.product_name}
+                            {Boolean(item.is_updated) && (
+                              <span style={{ fontSize: '0.72rem', color: '#C8873A', marginLeft: '5px', fontWeight: 700 }}>
+                                (Upsale)
+                              </span>
+                            )}
+                          </span>
                           <span style={{ textAlign: 'center' }}>{item.quantity}</span>
                           <span style={{ textAlign: 'right' }}>
                             ₱{(Number(item.price || item.unit_price) * item.quantity).toFixed(2)}

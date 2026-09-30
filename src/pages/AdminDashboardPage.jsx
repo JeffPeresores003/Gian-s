@@ -212,7 +212,13 @@ export default function AdminDashboardPage() {
     });
     if (product.image_url) {
       setImagePreview(getImageUrl(product.image_url));
-      setUploadMode(product.image_url.startsWith('/uploads') ? 'file' : 'url');
+      setUploadMode(
+        product.image_url.startsWith('data:image') ||
+        product.image_url.startsWith('/uploads') ||
+        product.image_url.includes('/uploads/')
+          ? 'file'
+          : 'url'
+      );
     } else {
       resetImageState();
     }
@@ -251,7 +257,6 @@ export default function AdminDashboardPage() {
     }
     setImageFile(file);
     setImagePreview(URL.createObjectURL(file));
-    setFormData((prev) => ({ ...prev, image_url: '' }));
   }, [addToast]);
 
   const handleDropZoneDragOver = (e) => {
@@ -285,7 +290,11 @@ export default function AdminDashboardPage() {
       errors.price = 'Valid non-negative price is required.';
     }
     if (!formData.category.trim()) errors.category = 'Category is required.';
-    if (uploadMode === 'url' && formData.image_url && !formData.image_url.match(/^https?:\/\//)) {
+    if (
+      uploadMode === 'url' &&
+      formData.image_url &&
+      !formData.image_url.match(/^(https?:\/\/|data:image\/|\/uploads\/)/)
+    ) {
       errors.image_url = 'Image URL must start with http:// or https://';
     }
     return errors;
@@ -301,7 +310,7 @@ export default function AdminDashboardPage() {
 
     setSaving(true);
     try {
-      let resolvedImageUrl = formData.image_url.trim() || null;
+      let resolvedImageUrl = formData.image_url?.trim() || null;
 
       if (imageFile) {
         setUploading(true);

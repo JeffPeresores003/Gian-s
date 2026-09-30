@@ -27,6 +27,8 @@ export default function AdminLoginPage() {
     if (admin) {
       if (admin.role === 'cashier') {
         navigate('/cashier/pos', { replace: true });
+      } else if (admin.role === 'rider') {
+        navigate('/rider', { replace: true });
       } else {
         const dest = safeRedirect.startsWith('/cashier') ? '/admin/dashboard' : safeRedirect;
         navigate(dest, { replace: true });
@@ -50,6 +52,9 @@ export default function AdminLoginPage() {
       if (role === 'cashier') {
         addToast(`Welcome back, Cashier ${username.trim()}.`, 'success');
         navigate('/cashier/pos', { replace: true });
+      } else if (role === 'rider') {
+        addToast(`Ready to ride, ${username.trim()}!`, 'success');
+        navigate('/rider', { replace: true });
       } else {
         addToast(`Welcome back, Admin ${username.trim()}.`, 'success');
         navigate(safeRedirect.startsWith('/cashier') ? '/admin/dashboard' : safeRedirect, { replace: true });
