@@ -32,8 +32,11 @@ export default function PieGraph({
   colorPalette = DEFAULT_PALETTE,
   valuePrefix = '₱',
   headerActions = null,
+  onItemClick = null,
+  selectedLabel = null,
 }) {
   const [hoveredIdx, setHoveredIdx] = useState(null);
+
 
   // Filter out non-positive values
   const validData = data.filter((d) => Number(d.value) > 0);
@@ -126,13 +129,42 @@ export default function PieGraph({
     };
   });
 
-  const activeSlice = hoveredIdx !== null ? slices[hoveredIdx] : null;
+  const selectedIdx = selectedLabel
+    ? slices.findIndex((s) => s.label?.toLowerCase() === String(selectedLabel).toLowerCase())
+    : -1;
+  const currentActiveIdx = hoveredIdx !== null ? hoveredIdx : (selectedIdx >= 0 ? selectedIdx : null);
+  const activeSlice = currentActiveIdx !== null ? slices[currentActiveIdx] : null;
+
+  const handleSliceClick = (slice, i) => {
+    setHoveredIdx(hoveredIdx === i ? null : i);
+    if (onItemClick) {
+      onItemClick(slice);
+    }
+  };
 
   return (
-    <div className="pie-graph-card">
+    <div className={`pie-graph-card ${onItemClick ? 'interactive-pie' : ''}`}>
       <div className="pie-graph-header">
         <div className="pie-header-text">
-          <h3 className="pie-graph-title">{title}</h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <h3 className="pie-graph-title">{title}</h3>
+            {onItemClick && (
+              <span
+                style={{
+                  fontSize: '0.7rem',
+                  fontWeight: 600,
+                  color: 'var(--color-brand-mid, #c48b3f)',
+                  background: 'rgba(196, 139, 63, 0.1)',
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.04em',
+                }}
+              >
+                Clickable
+              </span>
+            )}
+          </div>
           {subtitle && <p className="pie-graph-sub">{subtitle}</p>}
         </div>
         {headerActions && <div className="pie-header-actions">{headerActions}</div>}
@@ -164,15 +196,15 @@ export default function PieGraph({
                   strokeWidth={donutStrokeWidth}
                   className="pie-slice"
                   style={{
-                    cursor: 'pointer',
+                    cursor: onItemClick ? 'pointer' : 'default',
                     transition: 'all 0.25s ease',
                     transformOrigin: `${center}px ${center}px`,
-                    transform: hoveredIdx === 0 ? 'scale(1.03)' : 'scale(1)',
-                    filter: hoveredIdx === 0 ? 'url(#pie-slice-glow)' : 'none',
+                    transform: currentActiveIdx === 0 ? 'scale(1.03)' : 'scale(1)',
+                    filter: currentActiveIdx === 0 ? 'url(#pie-slice-glow)' : 'none',
                   }}
                   onMouseEnter={() => setHoveredIdx(0)}
                   onMouseLeave={() => setHoveredIdx(null)}
-                  onClick={() => setHoveredIdx(hoveredIdx === 0 ? null : 0)}
+                  onClick={() => handleSliceClick(slices[0], 0)}
                 />
               ) : (
                 <circle
@@ -182,21 +214,21 @@ export default function PieGraph({
                   fill={slices[0].color}
                   className="pie-slice"
                   style={{
-                    cursor: 'pointer',
+                    cursor: onItemClick ? 'pointer' : 'default',
                     transition: 'all 0.25s ease',
                     transformOrigin: `${center}px ${center}px`,
-                    transform: hoveredIdx === 0 ? 'scale(1.03)' : 'scale(1)',
-                    filter: hoveredIdx === 0 ? 'url(#pie-slice-glow)' : 'none',
+                    transform: currentActiveIdx === 0 ? 'scale(1.03)' : 'scale(1)',
+                    filter: currentActiveIdx === 0 ? 'url(#pie-slice-glow)' : 'none',
                   }}
                   onMouseEnter={() => setHoveredIdx(0)}
                   onMouseLeave={() => setHoveredIdx(null)}
-                  onClick={() => setHoveredIdx(hoveredIdx === 0 ? null : 0)}
+                  onClick={() => handleSliceClick(slices[0], 0)}
                 />
               )
             ) : (
               /* Multiple slices */
               slices.map((slice, i) => {
-                const isHovered = hoveredIdx === i;
+                const isHovered = currentActiveIdx === i;
                 return (
                   <path
                     key={i}
@@ -208,14 +240,14 @@ export default function PieGraph({
                     style={{
                       cursor: 'pointer',
                       transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
-                      opacity: hoveredIdx !== null && !isHovered ? 0.45 : 1,
+                      opacity: currentActiveIdx !== null && !isHovered ? 0.42 : 1,
                       transformOrigin: `${center}px ${center}px`,
-                      transform: isHovered ? 'scale(1.04)' : 'scale(1)',
+                      transform: isHovered ? 'scale(1.05)' : 'scale(1)',
                       filter: isHovered ? 'url(#pie-slice-glow)' : 'none',
                     }}
                     onMouseEnter={() => setHoveredIdx(i)}
                     onMouseLeave={() => setHoveredIdx(null)}
-                    onClick={() => setHoveredIdx(hoveredIdx === i ? null : i)}
+                    onClick={() => handleSliceClick(slice, i)}
                   />
                 );
               })
@@ -253,15 +285,21 @@ export default function PieGraph({
         {/* Legend List */}
         <div className="pie-legend-list">
           {slices.map((slice, i) => {
-            const isHovered = hoveredIdx === i;
+            const isHovered = currentActiveIdx === i;
             return (
               <div
                 key={i}
                 className={`pie-legend-item ${isHovered ? 'active' : ''}`}
                 onMouseEnter={() => setHoveredIdx(i)}
                 onMouseLeave={() => setHoveredIdx(null)}
-                onClick={() => setHoveredIdx(hoveredIdx === i ? null : i)}
-                style={{ cursor: 'pointer' }}
+                onClick={() => handleSliceClick(slice, i)}
+                style={{
+                  cursor: 'pointer',
+                  outline: isHovered ? `2px solid ${slice.color}` : 'none',
+                  borderRadius: '6px',
+                  padding: '4px 6px',
+                }}
+                title={onItemClick ? `Click to view breakdown for ${slice.label}` : ''}
               >
                 <div className="pie-legend-info">
                   <span

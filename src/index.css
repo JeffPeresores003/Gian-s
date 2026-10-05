@@ -2815,6 +2815,352 @@ body {
   box-shadow: none;
 }
 
+/* ─── Compact POS Cart Footer & Cashier Checkout (Task 5) ─── */
+.pos-cart-footer.compact {
+  padding: 8px 12px;
+  gap: 5px;
+  box-shadow: 0 -3px 12px rgba(44, 24, 16, 0.05);
+}
+
+.pos-compact-total-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 0;
+}
+
+.pos-total-label-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pos-total-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--color-brand);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.pos-compact-total-val {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--color-brand);
+}
+
+.pos-compact-total-val.total-discounted {
+  color: #C48B3F;
+  text-shadow: 0 0 10px rgba(196, 139, 63, 0.25);
+}
+
+.pos-discount-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: #FFFBEB;
+  border: 1px solid #FCD34D;
+  border-radius: 12px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #92400E;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pos-discount-tag:hover {
+  background: #FEF3C7;
+  border-color: #F59E0B;
+}
+
+.pos-discount-tag-close {
+  background: none;
+  border: none;
+  font-size: 0.75rem;
+  font-weight: 900;
+  color: #B45309;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.pos-discount-tag-close:hover {
+  color: #DC2626;
+}
+
+.btn-add-promo-link {
+  background: none;
+  border: none;
+  color: #C48B3F;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  transition: opacity 0.15s;
+}
+
+.btn-add-promo-link:hover {
+  opacity: 0.8;
+}
+
+/* Compact Payment Methods */
+.pos-payment-methods.compact {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+
+.pos-payment-methods.compact .pos-method-btn {
+  padding: 5px 4px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  height: 29px;
+  gap: 4px;
+}
+
+/* Single-line Cash & Change row */
+.pos-compact-cash-box {
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pos-cash-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pos-cash-mini-label {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--color-brand);
+  white-space: nowrap;
+}
+
+.pos-compact-tender-input {
+  width: 85px;
+  height: 26px;
+  padding: 2px 6px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  text-align: right;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-cream);
+  color: var(--color-brand);
+}
+
+.pos-compact-tender-input:focus {
+  border-color: var(--color-brand);
+  outline: none;
+  background: #fff;
+}
+
+.pos-btn-exact {
+  padding: 0 6px;
+  height: 26px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-cream);
+  color: var(--color-brand);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.12s;
+}
+
+.pos-btn-exact:hover {
+  background: #E8D8C8;
+}
+
+.pos-compact-change-pill {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+}
+
+.pill-change-success {
+  background: #ECFDF5;
+  color: #065F46;
+  border: 1px solid #A7F3D0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pill-change-warning {
+  background: #FEF3C7;
+  color: #92400E;
+  border: 1px solid #FCD34D;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pill-change-neutral {
+  color: var(--color-muted);
+  font-size: 0.7rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.btn-toggle-keypad-mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: var(--color-cream);
+  border: 1px solid var(--color-border);
+  color: var(--color-brand);
+  border-radius: 4px;
+  padding: 0 6px;
+  height: 26px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.12s;
+}
+
+.btn-toggle-keypad-mini:hover {
+  background: #E8D8C8;
+}
+
+.btn-toggle-keypad-mini.active {
+  background: rgba(200, 135, 58, 0.15);
+  border-color: #C8873A;
+  color: #92400E;
+}
+
+.pos-compact-keypad-dropdown {
+  padding-top: 4px;
+  border-top: 1px dashed var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  animation: slide-in-down 0.15s ease;
+}
+
+.pos-quick-cash-row.compact {
+  display: flex;
+  gap: 3px;
+}
+
+.pos-quick-cash-row.compact button {
+  flex: 1;
+  padding: 3px 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  background: var(--color-cream);
+  color: var(--color-brand);
+  cursor: pointer;
+}
+
+.pos-quick-cash-row.compact button:hover {
+  background: var(--color-brand-mid);
+  color: #fff;
+}
+
+.pos-num-pad.compact {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 3px;
+}
+
+.pos-pad-btn.compact {
+  padding: 4px 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  background: #FAF7F2;
+  color: var(--color-brand);
+  cursor: pointer;
+}
+
+.pos-pad-btn.compact:hover {
+  background: #F0E8D8;
+}
+
+/* Compact Checkout Button */
+.btn-pos-checkout.compact {
+  width: 100%;
+  height: 38px;
+  padding: 0 14px;
+  font-size: 0.9rem;
+  gap: 8px;
+  box-shadow: 0 2px 8px rgba(44, 24, 16, 0.15);
+}
+
+/* ─── Discount Modal Styles (Task 4) ─── */
+.pos-discount-preset-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--color-border);
+  background: #fff;
+  color: var(--color-brand);
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.pos-discount-preset-btn:hover {
+  border-color: #D4A96A;
+  background: #FFFDF9;
+  transform: translateY(-1px);
+}
+
+.pos-discount-preset-btn.active {
+  background: #FEF3C7;
+  border-color: #D97706;
+  color: #92400E;
+  box-shadow: 0 2px 8px rgba(217, 119, 6, 0.2);
+}
+
+.pos-discount-type-tab {
+  padding: 7px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: #fff;
+  color: var(--color-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.pos-discount-type-tab.active {
+  background: var(--color-brand);
+  color: #fff;
+  border-color: var(--color-brand);
+}
+
 /* ============================================================
    ORDER HISTORY & SALES REPORTS
    ============================================================ */
@@ -3108,19 +3454,97 @@ body {
 }
 
 @media print {
+  @page {
+    size: 72mm 185mm;
+    margin: 2mm 3mm;
+  }
+
+  html, body {
+    background: #fff !important;
+    overflow: visible !important;
+    height: auto !important;
+    min-height: auto !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    width: 70mm !important;
+    max-width: 70mm !important;
+    font-size: 11px !important;
+    font-family: 'Courier New', Courier, monospace !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
   body * {
     visibility: hidden;
   }
-  #printable-receipt, #printable-receipt * {
-    visibility: visible;
+
+  #root,
+  .pos-container,
+  .modal-overlay,
+  .modal-card,
+  #printable-receipt,
+  #printable-receipt * {
+    visibility: visible !important;
   }
+
+  .modal-overlay {
+    position: static !important;
+    inset: auto !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    animation: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: block !important;
+  }
+
+  .modal-card {
+    position: static !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    border: none !important;
+    animation: none !important;
+    transform: none !important;
+    overflow: visible !important;
+    max-height: none !important;
+    max-width: 70mm !important;
+    width: 70mm !important;
+    padding: 0 !important;
+    margin: 0 auto !important;
+    display: block !important;
+  }
+
+  .modal-actions,
+  .receipt-actions,
+  .pos-navbar,
+  .admin-navbar,
+  .admin-subnav,
+  .admin-content,
+  .navbar,
+  .pos-workspace,
+  .pos-history-container,
+  button {
+    display: none !important;
+  }
+
   #printable-receipt {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 300px;
-    border: none;
-    box-shadow: none;
+    display: block !important;
+    position: static !important;
+    left: auto !important;
+    top: auto !important;
+    width: 70mm !important;
+    max-width: 70mm !important;
+    margin: 0 auto !important;
+    padding: 4px 2px !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: #fff !important;
+    color: #000 !important;
+    font-size: 11px !important;
+    line-height: 1.25 !important;
+    page-break-inside: avoid !important;
+    page-break-after: avoid !important;
   }
 }
 

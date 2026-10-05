@@ -28,7 +28,7 @@ import api, { getImageUrl } from '../lib/api';
 import { useToast } from '../contexts/ToastContext';
 import { createQRCodeDataURL } from '../lib/qrcode';
 
-const FIXED_DELIVERY_FEE = 50.00;
+const FIXED_DELIVERY_FEE = 0.00;
 
 export default function MenuPage() {
   const { addToast } = useToast();
@@ -135,7 +135,7 @@ export default function MenuPage() {
   // ─── Cart Calculations ─────────────────────────────────────────
   const cartCount = useMemo(() => cart.reduce((sum, i) => sum + i.quantity, 0), [cart]);
   const cartSubtotal = useMemo(() => cart.reduce((sum, i) => sum + i.price * i.quantity, 0), [cart]);
-  const cartTotal = useMemo(() => (cartSubtotal > 0 ? cartSubtotal + FIXED_DELIVERY_FEE : 0), [cartSubtotal]);
+  const cartTotal = useMemo(() => cartSubtotal, [cartSubtotal]);
 
   // ─── Cart Handlers ─────────────────────────────────────────────
   const addToCart = (product) => {
@@ -192,7 +192,7 @@ export default function MenuPage() {
         customer_name: fullName.trim(),
         contact_number: contactNumber.trim(),
         delivery_address: deliveryAddress.trim(),
-        delivery_fee: FIXED_DELIVERY_FEE,
+        delivery_fee: 0,
         total_amount: cartTotal,
         notes: notes.trim() || null,
         items: cart.map((i) => ({
@@ -212,7 +212,7 @@ export default function MenuPage() {
         customer_name: fullName.trim(),
         contact_number: contactNumber.trim(),
         delivery_address: deliveryAddress.trim(),
-        delivery_fee: FIXED_DELIVERY_FEE,
+        delivery_fee: 0,
         notes: notes.trim() || null,
         total_amount: cartTotal,
         items: [...cart],
@@ -403,7 +403,7 @@ export default function MenuPage() {
       y = drawDashedDivider(y);
 
       // ── Totals ──
-      const delFee = Number(confirmedOrder.delivery_fee || FIXED_DELIVERY_FEE);
+      const delFee = Number(confirmedOrder.delivery_fee || 0);
       const calcSubtotal = itemsSubtotal > 0 ? itemsSubtotal : Math.max(0, Number(confirmedOrder.total_amount || 0) - delFee);
 
       ctx.font = '12px "Courier New", Courier, monospace';
@@ -415,13 +415,15 @@ export default function MenuPage() {
       ctx.fillText(`\u20B1${calcSubtotal.toFixed(2)}`, canvasWidth - pad, y);
       y += 18;
 
-      ctx.fillStyle = '#555555';
-      ctx.textAlign = 'left';
-      ctx.fillText('Delivery Fee:', pad, y);
-      ctx.fillStyle = '#1A1A1A';
-      ctx.textAlign = 'right';
-      ctx.fillText(`\u20B1${delFee.toFixed(2)}`, canvasWidth - pad, y);
-      y += 20;
+      if (delFee > 0) {
+        ctx.fillStyle = '#555555';
+        ctx.textAlign = 'left';
+        ctx.fillText('Delivery Fee:', pad, y);
+        ctx.fillStyle = '#1A1A1A';
+        ctx.textAlign = 'right';
+        ctx.fillText(`\u20B1${delFee.toFixed(2)}`, canvasWidth - pad, y);
+        y += 20;
+      }
 
       // Final Total Due Row (dashed top & bottom lines)
       ctx.strokeStyle = '#888888';
@@ -872,12 +874,6 @@ export default function MenuPage() {
                     </div>
 
                     <div className="cart-summary-box">
-                      <div className="cart-summary-row">
-                        <span>Items Subtotal</span><span>₱{cartSubtotal.toFixed(2)}</span>
-                      </div>
-                      <div className="cart-summary-row">
-                        <span>Delivery Fee</span><span>₱{FIXED_DELIVERY_FEE.toFixed(2)}</span>
-                      </div>
                       <div className="cart-summary-total">
                         <span>Total Due</span><span>₱{cartTotal.toFixed(2)}</span>
                       </div>
@@ -924,12 +920,6 @@ export default function MenuPage() {
                 </div>
 
                 <div className="cart-summary-box" style={{ marginBottom: '20px' }}>
-                  <div className="cart-summary-row">
-                    <span>Items Subtotal</span><span>₱{cartSubtotal.toFixed(2)}</span>
-                  </div>
-                  <div className="cart-summary-row">
-                    <span>Delivery Fee</span><span>₱{FIXED_DELIVERY_FEE.toFixed(2)}</span>
-                  </div>
                   <div className="cart-summary-total">
                     <span>Total Amount</span><span>₱{cartTotal.toFixed(2)}</span>
                   </div>
@@ -1035,10 +1025,12 @@ export default function MenuPage() {
                         <span>Items Subtotal</span>
                         <span>₱{(confirmedOrder.items?.reduce((s, i) => s + Number(i.price) * i.quantity, 0) || 0).toFixed(2)}</span>
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--color-muted)', marginBottom: '8px' }}>
-                        <span>Delivery Fee</span>
-                        <span>₱{Number(confirmedOrder.delivery_fee || FIXED_DELIVERY_FEE).toFixed(2)}</span>
-                      </div>
+                      {Number(confirmedOrder.delivery_fee) > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--color-muted)', marginBottom: '8px' }}>
+                          <span>Delivery Fee</span>
+                          <span>₱{Number(confirmedOrder.delivery_fee).toFixed(2)}</span>
+                        </div>
+                      )}
                     </div>
                     <div className="ticket-total-row">
                       <span>Total Amount Due</span>

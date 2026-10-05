@@ -6,6 +6,7 @@ import api, { getImageUrl } from '../lib/api';
 import * as XLSX from 'xlsx';
 import LineGraph from '../components/LineGraph';
 import PieGraph from '../components/PieGraph';
+import printReceiptSlip from '../lib/printReceipt';
 import {
   ShoppingBag,
   History,
@@ -41,6 +42,8 @@ import {
   AlertCircle,
   MapPin,
   Phone,
+  Tag,
+  Percent,
 } from 'lucide-react';
 
 export default function CashierPOSPage() {
@@ -80,7 +83,19 @@ export default function CashierPOSPage() {
   const [tenderedAmount, setTenderedAmount] = useState('');
   const [orderNotes, setOrderNotes] = useState('');
   const [submittingOrder, setSubmittingOrder] = useState(false);
-  const [discountActive, setDiscountActive] = useState(false); // 20% discount toggle
+
+  // ---------- Editable Discount State (Task 4) ----------
+  const [discount, setDiscount] = useState({
+    active: false,
+    type: 'percent', // 'percent' | 'fixed'
+    value: 20,
+    name: '20% OFF',
+  });
+  const [showDiscountModal, setShowDiscountModal] = useState(false);
+  const [discountTypeInput, setDiscountTypeInput] = useState('percent');
+  const [discountValueInput, setDiscountValueInput] = useState('20');
+  const [discountNameInput, setDiscountNameInput] = useState('');
+
   const [showCalculator, setShowCalculator] = useState(false); // Collapsible on-screen keypad
 
   // ---------- Completed Order Receipt Modal ----------
@@ -100,6 +115,48 @@ export default function CashierPOSPage() {
   const [loadingReport, setLoadingReport] = useState(false);
   const [lineGraphView, setLineGraphView] = useState('daily'); // 'daily' | 'monthly'
   const [pieGraphView, setPieGraphView] = useState('category'); // 'category' | 'dining'
+  const [drilldownCategory, setDrilldownCategory] = useState(null);
+  const [categoryTimeframe, setCategoryTimeframe] = useState('daily'); // 'daily' | 'monthly' | 'annually'
+
+  // Products belonging to the selected drilldown category, sorted by total revenue & qty sold (Daily / Monthly / Annually)
+  const categoryTopProducts = useMemo(() => {
+    if (!drilldownCategory || !reportData) return [];
+    let list = [];
+    if (categoryTimeframe === 'daily') {
+      list = reportData.product_breakdown_daily || [];
+    } else if (categoryTimeframe === 'annually') {
+      list = reportData.product_breakdown_yearly || [];
+    } else {
+      list = reportData.product_breakdown_monthly || reportData.product_breakdown || [];
+    }
+    return list
+      .filter((p) => p.category?.toLowerCase() === drilldownCategory.toLowerCase())
+      .sort((a, b) => Number(b.total) - Number(a.total));
+  }, [drilldownCategory, reportData, categoryTimeframe]);
+
+  // Today's / selected day's money breakdown by payment method (Cash, GCash, Card)
+  const dailyPaymentBreakdown = useMemo(() => {
+    if (!reportData?.payment_daily) return [];
+    const dateStr = reportDate;
+    const dayRows = reportData.payment_daily.filter((p) => p.sale_date === dateStr);
+    const defs = [
+      { method: 'cash', label: 'Cash Tendered', color: '#16A34A', bg: 'rgba(22, 163, 74, 0.08)' },
+      { method: 'gcash', label: 'GCash / QR', color: '#0284C7', bg: 'rgba(2, 132, 199, 0.08)' },
+      { method: 'card', label: 'Credit / Debit Card', color: '#4F46E5', bg: 'rgba(79, 70, 229, 0.08)' },
+    ];
+    return defs.map((d) => {
+      const match = dayRows.find((r) => r.method?.toLowerCase() === d.method);
+      return {
+        ...d,
+        count: match ? match.count : 0,
+        total: match ? Number(match.total) : 0,
+      };
+    });
+  }, [reportData, reportDate]);
+
+  const dailyTotalMoney = useMemo(() => {
+    return dailyPaymentBreakdown.reduce((sum, item) => sum + item.total, 0);
+  }, [dailyPaymentBreakdown]);
 
   // Chronological Daily Breakdown for Line Graph (Fills 7-day continuous window for smooth waveform)
   const lineDailyData = useMemo(() => {
@@ -155,15 +212,23 @@ export default function CashierPOSPage() {
       });
   }, [reportData]);
 
-  // Product Category breakdown for Pie Graph
+  // Product Category breakdown for Pie Graph (Daily / Monthly / Annually)
   const pieCategoryData = useMemo(() => {
-    if (!reportData?.category_breakdown) return [];
-    return reportData.category_breakdown.map((c) => ({
+    if (!reportData) return [];
+    let list = [];
+    if (categoryTimeframe === 'daily') {
+      list = reportData.category_breakdown_daily || [];
+    } else if (categoryTimeframe === 'annually') {
+      list = reportData.category_breakdown_yearly || [];
+    } else {
+      list = reportData.category_breakdown_monthly || reportData.category_breakdown || [];
+    }
+    return list.map((c) => ({
       label: c.category,
       value: Number(c.total),
       count: c.items_sold,
     }));
-  }, [reportData]);
+  }, [reportData, categoryTimeframe]);
 
   // Payment Method breakdown for Pie Graph
   const piePaymentData = useMemo(() => {
@@ -220,19 +285,31 @@ export default function CashierPOSPage() {
     });
   }, [products, selectedCategory, searchQuery]);
 
-  // ---------- Cart Calculations ----------
-  const DISCOUNT_RATE = 0.20; // 20% off
-
+  // ---------- Cart Calculations (Task 4: Editable Discount) ----------
   const cartSubtotal = useMemo(() => {
     return cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   }, [cart]);
 
   const discountAmount = useMemo(() => {
-    return discountActive ? cartSubtotal * DISCOUNT_RATE : 0;
-  }, [discountActive, cartSubtotal]);
+    if (!discount.active || cartSubtotal <= 0) return 0;
+    if (discount.type === 'percent') {
+      const pct = Math.max(0, parseFloat(discount.value) || 0);
+      return Math.min(cartSubtotal, (cartSubtotal * pct) / 100);
+    } else {
+      const fixed = Math.max(0, parseFloat(discount.value) || 0);
+      return Math.min(cartSubtotal, fixed);
+    }
+  }, [discount, cartSubtotal]);
+
+  const discountLabel = useMemo(() => {
+    if (!discount.active) return '';
+    if (discount.name?.trim()) return discount.name.trim();
+    if (discount.type === 'percent') return `${discount.value}% OFF`;
+    return `₱${parseFloat(discount.value || 0).toFixed(0)} OFF`;
+  }, [discount]);
 
   const cartTotal = useMemo(() => {
-    return cartSubtotal - discountAmount;
+    return Math.max(0, cartSubtotal - discountAmount);
   }, [cartSubtotal, discountAmount]);
 
   const numTendered = parseFloat(tenderedAmount) || 0;
@@ -281,7 +358,7 @@ export default function CashierPOSPage() {
     setTenderedAmount('');
     setCustomerName('');
     setOrderNotes('');
-    setDiscountActive(false);
+    setDiscount({ active: false, type: 'percent', value: 20, name: '20% OFF' });
   };
 
   // Quick cash buttons
@@ -326,11 +403,11 @@ export default function CashierPOSPage() {
         customer_name: customerName.trim() || 'Guest',
         order_type: orderType,
         payment_method: paymentMethod,
-        total_amount: cartTotal, // already discounted if discountActive
+        total_amount: cartTotal, // already discounted if discount.active
         amount_paid: paymentMethod === 'cash' ? numTendered : cartTotal,
         change_amount: paymentMethod === 'cash' ? changeDue : 0,
-        notes: discountActive
-          ? `[20% Discount Applied] ${orderNotes.trim() || ''}`.trim()
+        notes: discount.active
+          ? `[${discountLabel} (-₱${discountAmount.toFixed(2)})] ${orderNotes.trim() || ''}`.trim()
           : orderNotes.trim() || null,
         items: cart.map((item) => ({
           product_id: item.id,
@@ -612,8 +689,9 @@ export default function CashierPOSPage() {
   };
 
   const handlePrint = () => {
-    window.print();
+    printReceiptSlip('printable-receipt');
   };
+
 
   return (
     <div className={`pos-layout ${activeTab === 'pos' ? 'pos-active-workspace' : ''}`}>
@@ -847,16 +925,22 @@ export default function CashierPOSPage() {
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <h3 className="pos-cart-title">Current Order</h3>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {/* 20% Discount Toggle Button */}
+                  {/* Editable Discount / Promo Button */}
                   <button
                     type="button"
-                    className={`btn-discount-toggle ${discountActive ? 'active' : ''}`}
-                    onClick={() => setDiscountActive((prev) => !prev)}
-                    title={discountActive ? 'Click to remove 20% discount' : 'Click to apply 20% discount'}
+                    className={`btn-discount-toggle ${discount.active ? 'active' : ''}`}
+                    onClick={() => {
+                      setDiscountTypeInput(discount.type || 'percent');
+                      setDiscountValueInput(String(discount.value || 20));
+                      setDiscountNameInput(discount.name || '');
+                      setShowDiscountModal(true);
+                    }}
+                    title={discount.active ? `Click to edit ${discountLabel}` : 'Click to apply discount / promo'}
                     id="pos-discount-toggle-btn"
                   >
-                    <span className="discount-badge-text">20% OFF</span>
-                    {discountActive && <span className="discount-active-dot" />}
+                    <Tag size={12} />
+                    <span className="discount-badge-text">{discount.active ? discountLabel : 'Discount'}</span>
+                    {discount.active && <span className="discount-active-dot" />}
                   </button>
 
                   {cart.length > 0 && (
@@ -957,37 +1041,59 @@ export default function CashierPOSPage() {
               )}
             </div>
 
-            {/* Total & Calculator Counter */}
-            <div className="pos-cart-footer">
-              {/* Discount Summary Row */}
-              {discountActive && cart.length > 0 && (
-                <div className="pos-discount-summary">
-                  <div className="pos-discount-line">
-                    <span>Subtotal</span>
-                    <span>₱{cartSubtotal.toFixed(2)}</span>
-                  </div>
-                  <div className="pos-discount-line discount-row">
-                    <span>🏷️ 20% Discount</span>
-                    <span className="discount-save-amount">-₱{discountAmount.toFixed(2)}</span>
-                  </div>
+            {/* Compact Total & Payment Footer (Task 5) */}
+            <div className="pos-cart-footer compact">
+              {/* Row 1: Total & Discount Tag */}
+              <div className="pos-compact-total-row">
+                <div className="pos-total-label-wrap">
+                  <span className="pos-total-title">Total Amount</span>
+                  {discount.active && cartSubtotal > 0 ? (
+                    <span
+                      className="pos-discount-tag"
+                      onClick={() => {
+                        setDiscountTypeInput(discount.type);
+                        setDiscountValueInput(String(discount.value));
+                        setDiscountNameInput(discount.name);
+                        setShowDiscountModal(true);
+                      }}
+                      title="Click to edit discount"
+                    >
+                      🏷️ {discountLabel} (-₱{discountAmount.toFixed(2)})
+                      <button
+                        type="button"
+                        className="pos-discount-tag-close"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDiscount({ active: false, type: 'percent', value: 20, name: '20% OFF' });
+                        }}
+                        title="Remove discount"
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn-add-promo-link"
+                      onClick={() => setShowDiscountModal(true)}
+                    >
+                      + Promo / Discount
+                    </button>
+                  )}
                 </div>
-              )}
-
-              <div className="pos-summary-row pos-total-row">
-                <span>Total Amount</span>
-                <span className={`pos-total-amount ${discountActive ? 'total-discounted' : ''}`}>
+                <span className={`pos-compact-total-val ${discount.active ? 'total-discounted' : ''}`}>
                   ₱{cartTotal.toFixed(2)}
                 </span>
               </div>
 
-              {/* Payment Method Selector */}
-              <div className="pos-payment-methods">
+              {/* Row 2: Compact Payment Method Selector */}
+              <div className="pos-payment-methods compact">
                 <button
                   type="button"
                   className={`pos-method-btn ${paymentMethod === 'cash' ? 'active' : ''}`}
                   onClick={() => setPaymentMethod('cash')}
                 >
-                  <Banknote size={15} /> Cash
+                  <Banknote size={13} /> Cash
                 </button>
                 <button
                   type="button"
@@ -997,7 +1103,7 @@ export default function CashierPOSPage() {
                     setTenderedAmount(cartTotal.toFixed(2));
                   }}
                 >
-                  <Smartphone size={15} /> GCash / QR
+                  <Smartphone size={13} /> GCash / QR
                 </button>
                 <button
                   type="button"
@@ -1007,45 +1113,63 @@ export default function CashierPOSPage() {
                     setTenderedAmount(cartTotal.toFixed(2));
                   }}
                 >
-                  <CreditCard size={15} /> Card
+                  <CreditCard size={13} /> Card
                 </button>
               </div>
 
-              {/* Cash Calculator & Change */}
+              {/* Row 3: Cash Tender & Change in ONE single horizontal row */}
               {paymentMethod === 'cash' && (
-                <div className="pos-calculator-box">
-                  <div className="pos-tender-input-wrap">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <label className="pos-tender-label" style={{ margin: 0 }}>Cash (₱):</label>
-                      <button
-                        type="button"
-                        className={`btn-toggle-keypad ${showCalculator ? 'active' : ''}`}
-                        onClick={() => setShowCalculator((prev) => !prev)}
-                        id="pos-toggle-keypad-btn"
-                        title={showCalculator ? 'Hide calculator keypad to see all ordered products' : 'Show calculator keypad'}
-                      >
-                        <CalcIcon size={12} />
-                        <span>{showCalculator ? 'Hide Keypad' : 'Keypad'}</span>
-                        {showCalculator ? <ChevronDown size={11} /> : <ChevronUp size={11} />}
-                      </button>
-                    </div>
+                <div className="pos-compact-cash-box">
+                  <div className="pos-cash-input-row">
+                    <span className="pos-cash-mini-label">Cash (₱):</span>
                     <input
                       type="number"
                       step="any"
                       min="0"
-                      className="pos-tender-input"
+                      className="pos-compact-tender-input"
                       placeholder="0.00"
                       value={tenderedAmount}
                       onChange={(e) => setTenderedAmount(e.target.value)}
                       id="pos-cash-tendered-input"
                     />
+                    <button
+                      type="button"
+                      className="pos-btn-exact"
+                      onClick={() => setQuickCash('exact')}
+                      title="Set tendered amount to exact total"
+                    >
+                      Exact
+                    </button>
+
+                    <div className="pos-compact-change-pill">
+                      {cartTotal > 0 && numTendered > 0 ? (
+                        numTendered >= cartTotal ? (
+                          <span className="pill-change-success">Change: ₱{changeDue.toFixed(2)}</span>
+                        ) : (
+                          <span className="pill-change-warning">Short: ₱{amountShort.toFixed(2)}</span>
+                        )
+                      ) : (
+                        <span className="pill-change-neutral">Enter cash above</span>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      className={`btn-toggle-keypad-mini ${showCalculator ? 'active' : ''}`}
+                      onClick={() => setShowCalculator((prev) => !prev)}
+                      id="pos-toggle-keypad-btn"
+                      title={showCalculator ? 'Hide Keypad' : 'Show Keypad'}
+                    >
+                      <CalcIcon size={12} />
+                      <span>Keypad</span>
+                      {showCalculator ? <ChevronDown size={11} /> : <ChevronUp size={11} />}
+                    </button>
                   </div>
 
-                  {/* Fast Tender Buttons & Calculator Keypad (Collapsible) */}
+                  {/* Collapsible Keypad & Quick Cash */}
                   {showCalculator && (
-                    <>
-                      <div className="pos-quick-cash-row">
-                        <button type="button" onClick={() => setQuickCash('exact')}>Exact</button>
+                    <div className="pos-compact-keypad-dropdown">
+                      <div className="pos-quick-cash-row compact">
                         <button type="button" onClick={() => setQuickCash(50)}>₱50</button>
                         <button type="button" onClick={() => setQuickCash(100)}>₱100</button>
                         <button type="button" onClick={() => setQuickCash(200)}>₱200</button>
@@ -1053,61 +1177,40 @@ export default function CashierPOSPage() {
                         <button type="button" onClick={() => setQuickCash(1000)}>₱1000</button>
                       </div>
 
-                      <div className="pos-num-pad">
+                      <div className="pos-num-pad compact">
                         {['7', '8', '9', '4', '5', '6', '1', '2', '3', '0', '.', 'C'].map((k) => (
                           <button
                             key={k}
                             type="button"
-                            className="pos-pad-btn"
+                            className="pos-pad-btn compact"
                             onClick={() => appendKeypad(k)}
                           >
                             {k}
                           </button>
                         ))}
                       </div>
-                    </>
+                    </div>
                   )}
-
-                  {/* Real-time Change or Shortfall Display */}
-                  <div className="pos-change-banner">
-                    {cartTotal > 0 && numTendered > 0 ? (
-                      numTendered >= cartTotal ? (
-                        <div className="pos-change-badge success">
-                          <span>Change Due:</span>
-                          <strong>₱{changeDue.toFixed(2)}</strong>
-                        </div>
-                      ) : (
-                        <div className="pos-change-badge warning">
-                          <span>Amount Lacking:</span>
-                          <strong>₱{amountShort.toFixed(2)}</strong>
-                        </div>
-                      )
-                    ) : (
-                      <div className="pos-change-badge neutral">
-                        <span>Enter cash tendered above</span>
-                      </div>
-                    )}
-                  </div>
                 </div>
               )}
 
-              {/* Complete Order Button */}
+              {/* Row 4: Complete Order Button */}
               <button
                 type="button"
-                className="btn-pos-checkout"
+                className="btn-pos-checkout compact"
                 disabled={cart.length === 0 || submittingOrder || !isPaymentValid}
                 onClick={handleCheckout}
                 id="pos-submit-order-btn"
               >
                 {submittingOrder ? (
                   <>
-                    <Loader2 className="spinner" size={18} />
+                    <Loader2 className="spinner" size={15} />
                     <span>Processing Order...</span>
                   </>
                 ) : (
                   <>
                     <span>Place Order &bull; ₱{cartTotal.toFixed(2)}</span>
-                    <ArrowRight size={18} />
+                    <ArrowRight size={15} />
                   </>
                 )}
               </button>
@@ -1387,12 +1490,15 @@ export default function CashierPOSPage() {
 
                 {/* 2. Dual Pie Graphs Row */}
                 <div className="pos-charts-row">
-                  {/* Category Breakdown Donut */}
+                  {/* Category Breakdown Donut (Clickable) */}
+                  {/* Category Breakdown Donut with Daily / Monthly / Annually Buttons */}
                   <PieGraph
                     data={pieCategoryData}
                     title="Revenue by Product Category"
-                    subtitle="Share of sales across coffee, teas, pastries, & specials"
+                    subtitle={`Breakdown (${categoryTimeframe === 'daily' ? new Date(reportDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : categoryTimeframe === 'monthly' ? new Date(reportDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : new Date(reportDate).getFullYear()}). Click a category to inspect its top-selling products.`}
                     donut={true}
+                    onItemClick={(slice) => setDrilldownCategory(slice.label)}
+                    selectedLabel={drilldownCategory}
                     colorPalette={[
                       '#C48B3F', // Caramel
                       '#2C1810', // Espresso
@@ -1402,6 +1508,31 @@ export default function CashierPOSPage() {
                       '#DC2626', // Crimson Roast
                       '#0284C7', // Sky Blue
                     ]}
+                    headerActions={
+                      <div className="chart-pill-toggles">
+                        <button
+                          type="button"
+                          className={`chart-pill-btn ${categoryTimeframe === 'daily' ? 'active' : ''}`}
+                          onClick={() => setCategoryTimeframe('daily')}
+                        >
+                          Daily
+                        </button>
+                        <button
+                          type="button"
+                          className={`chart-pill-btn ${categoryTimeframe === 'monthly' ? 'active' : ''}`}
+                          onClick={() => setCategoryTimeframe('monthly')}
+                        >
+                          Monthly
+                        </button>
+                        <button
+                          type="button"
+                          className={`chart-pill-btn ${categoryTimeframe === 'annually' ? 'active' : ''}`}
+                          onClick={() => setCategoryTimeframe('annually')}
+                        >
+                          Annually
+                        </button>
+                      </div>
+                    }
                   />
 
                   {/* Payment Method & Dining Preference Breakdown */}
@@ -1440,7 +1571,71 @@ export default function CashierPOSPage() {
                     }
                   />
                 </div>
+
+                {/* 3. Daily Money Breakdown by Payment Method (Task 4) */}
+                <div className="pos-breakdown-card" style={{ marginTop: '20px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                    <div>
+                      <h3 className="pos-breakdown-title" style={{ margin: 0 }}>
+                        Daily Money Breakdown &bull; {new Date(reportDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                      </h3>
+                      <p style={{ margin: '2px 0 0 0', fontSize: '0.82rem', color: 'var(--color-muted)' }}>
+                        Exact money earned today split by GCash, Cash, and Card tender
+                      </p>
+                    </div>
+                    <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--color-brand)', background: 'var(--color-cream)', padding: '5px 12px', borderRadius: '20px', border: '1px solid var(--color-border)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                      <TrendingUp size={14} color="var(--color-brand)" /> Day Total Earned: ₱{dailyTotalMoney.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
+                    {dailyPaymentBreakdown.map((pm) => (
+                      <div
+                        key={pm.method}
+                        style={{
+                          background: pm.bg,
+                          border: `1.5px solid ${pm.color}33`,
+                          borderRadius: 'var(--radius-md)',
+                          padding: '16px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '14px',
+                        }}
+                      >
+                        <div
+                          style={{
+                            background: '#fff',
+                            width: '46px',
+                            height: '46px',
+                            borderRadius: '50%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            boxShadow: '0 2px 6px rgba(0,0,0,0.08)',
+                            color: pm.color,
+                          }}
+                        >
+                          {pm.method === 'cash' && <Banknote size={22} color={pm.color} />}
+                          {pm.method === 'gcash' && <Smartphone size={22} color={pm.color} />}
+                          {pm.method === 'card' && <CreditCard size={22} color={pm.color} />}
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '0.78rem', fontWeight: 700, color: pm.color, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                            {pm.label}
+                          </div>
+                          <div style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--color-brand)', fontFamily: 'var(--font-sans)', margin: '2px 0' }}>
+                            ₱{pm.total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
+                          <div style={{ fontSize: '0.8rem', color: 'var(--color-muted)' }}>
+                            <strong>{pm.count}</strong> transactions ({dailyTotalMoney > 0 ? ((pm.total / dailyTotalMoney) * 100).toFixed(1) : 0}%)
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
+
 
               {/* Daily Breakdown for Selected Month */}
               <div className="pos-breakdown-section">
@@ -2016,6 +2211,300 @@ export default function CashierPOSPage() {
         </div>
       )}
 
+      {/* ─── DISCOUNT / PROMO MODAL (Task 4) ─── */}
+      {showDiscountModal && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowDiscountModal(false)}
+          style={{ zIndex: 1100 }}
+        >
+          <div
+            className="modal-card"
+            style={{ maxWidth: '440px', padding: '24px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header" style={{ marginBottom: '16px' }}>
+              <div>
+                <h3 className="modal-title" style={{ fontSize: '1.25rem', margin: 0 }}>
+                  Order Discount / Promo
+                </h3>
+                <p style={{ margin: '4px 0 0 0', fontSize: '0.82rem', color: 'var(--color-muted)' }}>
+                  Current Order Subtotal: <strong style={{ color: 'var(--color-brand)' }}>₱{cartSubtotal.toFixed(2)}</strong>
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn-pos-clear"
+                onClick={() => setShowDiscountModal(false)}
+                style={{ padding: '4px 8px' }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Quick Presets */}
+            <div style={{ marginBottom: '18px' }}>
+              <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: 'var(--color-brand)', marginBottom: '8px' }}>
+                Quick Preset Promos
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+                <button
+                  type="button"
+                  className={`pos-discount-preset-btn ${discount.active && discount.type === 'percent' && Number(discount.value) === 20 ? 'active' : ''}`}
+                  onClick={() => {
+                    setDiscount({ active: true, type: 'percent', value: 20, name: '20% OFF' });
+                    setShowDiscountModal(false);
+                    addToast('Applied 20% discount!', 'success');
+                  }}
+                >
+                  <Percent size={14} /> 20% Standard OFF
+                </button>
+                <button
+                  type="button"
+                  className={`pos-discount-preset-btn ${discount.active && discount.type === 'percent' && Number(discount.value) === 10 ? 'active' : ''}`}
+                  onClick={() => {
+                    setDiscount({ active: true, type: 'percent', value: 10, name: '10% OFF' });
+                    setShowDiscountModal(false);
+                    addToast('Applied 10% promo discount!', 'success');
+                  }}
+                >
+                  <Percent size={14} /> 10% Promo OFF
+                </button>
+                <button
+                  type="button"
+                  className={`pos-discount-preset-btn ${discount.active && discount.type === 'fixed' && Number(discount.value) === 100 ? 'active' : ''}`}
+                  onClick={() => {
+                    setDiscount({ active: true, type: 'fixed', value: 100, name: '₱100 OFF Promo' });
+                    setShowDiscountModal(false);
+                    addToast('Applied ₱100 OFF promo discount!', 'success');
+                  }}
+                >
+                  <Tag size={14} /> ₱100 OFF Promo
+                </button>
+                <button
+                  type="button"
+                  className={`pos-discount-preset-btn ${discount.active && discount.type === 'fixed' && Number(discount.value) === 50 ? 'active' : ''}`}
+                  onClick={() => {
+                    setDiscount({ active: true, type: 'fixed', value: 50, name: '₱50 OFF Promo' });
+                    setShowDiscountModal(false);
+                    addToast('Applied ₱50 OFF promo discount!', 'success');
+                  }}
+                >
+                  <Tag size={14} /> ₱50 OFF Promo
+                </button>
+              </div>
+            </div>
+
+            {/* Custom Discount Form */}
+            <div style={{
+              background: 'var(--color-cream)',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-md)',
+              padding: '14px',
+              marginBottom: '18px'
+            }}>
+              <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: 'var(--color-brand)', marginBottom: '8px' }}>
+                Custom Promo / Discount Amount
+              </label>
+
+              {/* Type Switcher */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '10px' }}>
+                <button
+                  type="button"
+                  className={`pos-discount-type-tab ${discountTypeInput === 'percent' ? 'active' : ''}`}
+                  onClick={() => setDiscountTypeInput('percent')}
+                >
+                  % Percentage Off
+                </button>
+                <button
+                  type="button"
+                  className={`pos-discount-type-tab ${discountTypeInput === 'fixed' ? 'active' : ''}`}
+                  onClick={() => setDiscountTypeInput('fixed')}
+                >
+                  ₱ Fixed Pesos Off
+                </button>
+              </div>
+
+              {/* Amount input */}
+              <div style={{ position: 'relative', marginBottom: '8px' }}>
+                <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', fontWeight: 800, color: 'var(--color-brand)', fontSize: '0.95rem' }}>
+                  {discountTypeInput === 'percent' ? '%' : '₱'}
+                </span>
+                <input
+                  type="number"
+                  step="any"
+                  min="0"
+                  placeholder={discountTypeInput === 'percent' ? 'Enter percentage (e.g. 15)' : 'Enter amount in Pesos (e.g. 100)'}
+                  value={discountValueInput}
+                  onChange={(e) => setDiscountValueInput(e.target.value)}
+                  className="order-form-input"
+                  style={{ paddingLeft: '32px', height: '38px', fontSize: '0.95rem', fontWeight: 700 }}
+                />
+              </div>
+
+              {/* Custom Label input */}
+              <input
+                type="text"
+                placeholder="Optional Promo Label (e.g. Weekend Promo, Senior, VIP)"
+                value={discountNameInput}
+                onChange={(e) => setDiscountNameInput(e.target.value)}
+                className="order-form-input"
+                style={{ height: '36px', fontSize: '0.82rem' }}
+              />
+            </div>
+
+            {/* Modal Actions */}
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', alignItems: 'center' }}>
+              {discount.active && (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    setDiscount({ active: false, type: 'percent', value: 20, name: '20% OFF' });
+                    setShowDiscountModal(false);
+                    addToast('Discount removed.', 'info');
+                  }}
+                  style={{ marginRight: 'auto', color: '#B91C1C', borderColor: '#FCA5A5' }}
+                >
+                  Remove Discount
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setShowDiscountModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => {
+                  const val = parseFloat(discountValueInput);
+                  if (isNaN(val) || val <= 0) {
+                    addToast('Please enter a valid discount amount.', 'error');
+                    return;
+                  }
+                  if (discountTypeInput === 'percent' && val > 100) {
+                    addToast('Percentage discount cannot exceed 100%.', 'error');
+                    return;
+                  }
+                  const name = discountNameInput.trim()
+                    ? discountNameInput.trim()
+                    : discountTypeInput === 'percent' ? `${val}% OFF` : `₱${val} OFF`;
+                  setDiscount({
+                    active: true,
+                    type: discountTypeInput,
+                    value: val,
+                    name,
+                  });
+                  setShowDiscountModal(false);
+                  addToast(`Applied discount: ${name}!`, 'success');
+                }}
+              >
+                Apply Discount
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Category Top Products Breakdown Modal (Task 4) */}
+      {drilldownCategory && (
+        <div className="modal-overlay" onClick={() => setDrilldownCategory(null)}>
+          <div className="modal-card" style={{ maxWidth: '640px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-brand-mid)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Category Performance Drilldown &bull; {categoryTimeframe.toUpperCase()} VIEW
+                </span>
+                <h3 className="modal-title" style={{ marginTop: '2px' }}>
+                  Top Selling Products &bull; {drilldownCategory}
+                </h3>
+              </div>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={() => setDrilldownCategory(null)}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ marginTop: '8px' }}>
+              {categoryTopProducts.length === 0 ? (
+                <div className="state-center" style={{ padding: '32px' }}>
+                  <ShoppingBag size={36} className="state-icon" />
+                  <p className="state-sub">No sales registered for items in {drilldownCategory} during this period.</p>
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th style={{ width: '40px' }}>Rank</th>
+                        <th>Product Item</th>
+                        <th style={{ textAlign: 'center' }}>Units Sold</th>
+                        <th style={{ textAlign: 'center' }}>Orders</th>
+                        <th style={{ textAlign: 'right' }}>Total Revenue</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {categoryTopProducts.map((p, idx) => (
+                        <tr key={idx}>
+                          <td>
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                width: '24px',
+                                height: '24px',
+                                borderRadius: '50%',
+                                background: idx === 0 ? '#FEF3C7' : idx === 1 ? '#F3F4F6' : idx === 2 ? '#FFEDD5' : 'transparent',
+                                color: idx === 0 ? '#92400E' : idx === 1 ? '#374151' : idx === 2 ? '#9A3412' : 'var(--color-muted)',
+                                fontWeight: 700,
+                                fontSize: '0.78rem',
+                              }}
+                            >
+                              #{idx + 1}
+                            </span>
+                          </td>
+                          <td>
+                            <strong>{p.product_name}</strong>
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <span style={{ background: 'var(--color-cream)', padding: '2px 8px', borderRadius: '12px', fontWeight: 600, fontSize: '0.85rem' }}>
+                              {p.qty_sold} sold
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'center', color: 'var(--color-muted)', fontSize: '0.85rem' }}>
+                            {p.order_count}
+                          </td>
+                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--color-brand)' }}>
+                            ₱{Number(p.total).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="modal-actions" style={{ marginTop: '20px' }}>
+              <button
+                type="button"
+                className="btn-save"
+                onClick={() => setDrilldownCategory(null)}
+              >
+                Close Drilldown
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ─── RECEIPT POPUP MODAL (After Checkout or from History) ─── */}
       {(showReceiptModal && completedOrder) || viewingReceiptOrder ? (
         <div
@@ -2115,22 +2604,22 @@ export default function CashierPOSPage() {
 
                     <div className="receipt-totals">
                       {/* Show discount line on receipt for fresh orders */}
-                      {completedOrder && discountActive && (
+                      {completedOrder && discount.active && (
                         <>
                           <div className="receipt-total-row">
                             <span>Subtotal:</span>
                             <span>₱{cartSubtotal.toFixed(2)}</span>
                           </div>
                           <div className="receipt-total-row" style={{ color: '#16a34a', fontWeight: 700 }}>
-                            <span>20% Discount:</span>
+                            <span>Discount ({discountLabel}):</span>
                             <span>-₱{discountAmount.toFixed(2)}</span>
                           </div>
                         </>
                       )}
                       {/* Show discount note from history receipts */}
-                      {viewingReceiptOrder && order.notes?.includes('[20% Discount Applied]') && (
+                      {viewingReceiptOrder && order.notes?.includes('[') && (order.notes?.includes('Discount') || order.notes?.includes('OFF')) && (
                         <div className="receipt-total-row" style={{ color: '#16a34a', fontSize: '0.78rem' }}>
-                          <span>🏷️ 20% Discount was applied</span>
+                          <span>🏷️ {order.notes.match(/\[(.*?)\]/)?.[1] || 'Discount Applied'}</span>
                         </div>
                       )}
                       <div className="receipt-total-row final">

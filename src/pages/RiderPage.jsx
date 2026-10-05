@@ -29,7 +29,9 @@ import {
   X,
   FileText,
   Clock,
+  Image as ImageIcon,
 } from 'lucide-react';
+import jsQR from 'jsqr';
 
 const STATUS_CONFIG = {
   confirmed: {
@@ -48,6 +50,67 @@ const STATUS_CONFIG = {
   },
 };
 
+// Sound & haptic feedback on successful scan
+const playScanSuccessSound = () => {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(1760, ctx.currentTime + 0.12);
+    gain.gain.setValueAtTime(0.25, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.15);
+  } catch {}
+  if (navigator.vibrate) {
+    try { navigator.vibrate(120); } catch {}
+  }
+};
+
+// Pure decoder supporting BarcodeDetector and jsQR fallback
+const decodeQRCode = async (source) => {
+  if (!source) return null;
+
+  // 1. Try native BarcodeDetector if supported by browser
+  if ('BarcodeDetector' in window) {
+    try {
+      const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+      const codes = await detector.detect(source);
+      if (codes && codes.length > 0 && codes[0].rawValue) {
+        return codes[0].rawValue;
+      }
+    } catch {
+      // Fall through to jsQR
+    }
+  }
+
+  // 2. jsQR Canvas fallback
+  try {
+    const width = source.videoWidth || source.naturalWidth || source.width;
+    const height = source.videoHeight || source.naturalHeight || source.height;
+    if (!width || !height) return null;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(source, 0, 0, width, height);
+    const imgData = ctx.getImageData(0, 0, width, height);
+    const result = jsQR(imgData.data, imgData.width, imgData.height, {
+      inversionAttempts: 'dontInvert',
+    });
+    return result ? result.data : null;
+  } catch {
+    return null;
+  }
+};
+
 /* --- Delivery Confirmation & Scanner Modal ---------------------- */
 function DeliveryConfirmationModal({
   initialToken = '',
@@ -60,14 +123,16 @@ function DeliveryConfirmationModal({
   const { addToast } = useToast();
   const videoRef = useRef(null);
   const streamRef = useRef(null);
+  const fileInputRef = useRef(null);
 
-  const [scanMode, setScanMode] = useState('manual'); // 'manual' | 'camera'
+  const [scanMode, setScanMode] = useState('camera'); // default to camera for instant scanning
   const [cameraError, setCameraError] = useState('');
   const [searchInput, setSearchInput] = useState(initialToken || '');
   const [verifying, setVerifying] = useState(false);
   const [verifiedOrder, setVerifiedOrder] = useState(initialOrder);
   const [actionLoading, setActionLoading] = useState(false);
   const [showCancelPrompt, setShowCancelPrompt] = useState(false);
+  const [scanSuccess, setScanSuccess] = useState(false);
 
   // If initialOrder is provided or changed, populate verifiedOrder
   useEffect(() => {
@@ -86,15 +151,21 @@ function DeliveryConfirmationModal({
     }
   }, [initialOrder, initialToken]);
 
-  // Camera scanner handling
+  // Live Camera QR Scanner Loop with BarcodeDetector + jsQR fallback
   useEffect(() => {
     let active = true;
+    let timer = null;
+    let isDecoding = false;
 
     if (scanMode === 'camera' && !verifiedOrder) {
       const startCamera = async () => {
         try {
           const stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: { ideal: 'environment' } },
+            video: {
+              facingMode: { ideal: 'environment' },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
           });
           if (!active) {
             stream.getTracks().forEach((t) => t.stop());
@@ -103,23 +174,56 @@ function DeliveryConfirmationModal({
           streamRef.current = stream;
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
-            videoRef.current.play().catch(() => {});
+            await videoRef.current.play().catch(() => {});
           }
           setCameraError('');
+
+          // Continuous detection tick
+          const scanTick = async () => {
+            if (!active) return;
+            const video = videoRef.current;
+            if (video && video.readyState >= 2 && video.videoWidth > 0 && !isDecoding) {
+              isDecoding = true;
+              try {
+                const detectedCode = await decodeQRCode(video);
+                if (detectedCode && active) {
+                  playScanSuccessSound();
+                  setScanSuccess(true);
+                  if (streamRef.current) {
+                    streamRef.current.getTracks().forEach((t) => t.stop());
+                    streamRef.current = null;
+                  }
+                  handleSearch(detectedCode);
+                  return; // Stop scanning loop on success
+                }
+              } catch (scanErr) {
+                console.error('Scan error:', scanErr);
+              } finally {
+                isDecoding = false;
+              }
+            }
+            if (active) {
+              timer = setTimeout(scanTick, 120);
+            }
+          };
+
+          scanTick();
         } catch (err) {
           if (active) {
             setCameraError(
-              'Camera access unavailable or denied. Switch to manual search below.'
+              'Camera access unavailable or denied. Switch to manual search or upload a QR image below.'
             );
             setScanMode('manual');
           }
         }
       };
+
       startCamera();
     }
 
     return () => {
       active = false;
+      if (timer) clearTimeout(timer);
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
@@ -128,26 +232,65 @@ function DeliveryConfirmationModal({
   }, [scanMode, verifiedOrder]);
 
   const handleSearch = async (queryToSearch) => {
-    const q = (queryToSearch || searchInput).trim();
+    let q = (queryToSearch || searchInput).trim();
     if (!q) {
       addToast('Please enter customer name, OTN, or QR token.', 'error');
       return;
     }
 
+    // Smart parse QR payloads (JSON, URL, tokens)
+    try {
+      if (q.startsWith('{') && q.endsWith('}')) {
+        const parsed = JSON.parse(q);
+        q = parsed.qr_token || parsed.order_number || parsed.otn || parsed.id || q;
+      } else if (q.includes('/track/')) {
+        q = q.split('/track/').pop().split(/[?#]/)[0];
+      } else if (q.includes('token=')) {
+        const match = q.match(/token=([^&]+)/);
+        if (match) q = decodeURIComponent(match[1]);
+      }
+    } catch {}
+
     setVerifying(true);
     try {
       const res = await api.post('/online-orders/verify-qr', { query: q });
       setVerifiedOrder(res.data.order);
-      addToast(`Order found for ${res.data.order.customer_name}!`, 'success');
+      addToast(`Order verified for ${res.data.order.customer_name}!`, 'success');
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
       }
     } catch (err) {
       const msg = err.response?.data?.message || `No active delivery found matching "${q}".`;
       addToast(msg, 'error');
+      setScanSuccess(false);
     } finally {
       setVerifying(false);
     }
+  };
+
+  const handleImageUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = (loadEvent) => {
+      img.onload = async () => {
+        const detectedText = await decodeQRCode(img);
+        if (detectedText) {
+          playScanSuccessSound();
+          addToast('QR Code successfully detected from image!', 'success');
+          handleSearch(detectedText);
+        } else {
+          addToast('No QR code could be found in that photo. Please try a clearer image.', 'error');
+        }
+      };
+      img.src = loadEvent.target.result;
+    };
+    reader.readAsDataURL(file);
+    // Reset file input
+    e.target.value = '';
   };
 
   const handleSelectQuickOrder = (ord) => {
@@ -292,7 +435,8 @@ function DeliveryConfirmationModal({
               {scanMode === 'camera' && (
                 <div style={{
                   position: 'relative', borderRadius: 'var(--radius-md)', overflow: 'hidden',
-                  border: '1.5px solid var(--color-border)', background: '#1A1208', height: '210px'
+                  border: scanSuccess ? '2px solid #16A34A' : '1.5px solid var(--color-border)',
+                  background: '#1A1208', height: '220px'
                 }}>
                   <video
                     ref={videoRef}
@@ -307,28 +451,76 @@ function DeliveryConfirmationModal({
                     pointerEvents: 'none'
                   }}>
                     <div style={{
-                      width: '140px', height: '140px', border: '2px solid rgba(212,169,106,0.85)',
-                      borderRadius: '8px', boxShadow: '0 0 0 9999px rgba(0,0,0,0.38)'
-                    }} />
+                      position: 'relative',
+                      width: '150px', height: '150px',
+                      border: scanSuccess ? '3px solid #16A34A' : '2px solid rgba(212,169,106,0.9)',
+                      borderRadius: '12px',
+                      boxShadow: '0 0 0 9999px rgba(0,0,0,0.45)',
+                      overflow: 'hidden'
+                    }}>
+                      {/* Active laser scan beam */}
+                      {!scanSuccess && (
+                        <div style={{
+                          position: 'absolute',
+                          left: 0, right: 0, height: '2px',
+                          background: 'linear-gradient(90deg, transparent, #22C55E, transparent)',
+                          boxShadow: '0 0 8px #22C55E',
+                          animation: 'scan-laser 2s ease-in-out infinite'
+                        }} />
+                      )}
+                    </div>
                   </div>
+
                   <div style={{
-                    position: 'absolute', bottom: 0, left: 0, right: 0, background: 'rgba(26,18,8,0.75)',
-                    textAlign: 'center', padding: '6px 12px'
+                    position: 'absolute', bottom: 0, left: 0, right: 0, background: 'rgba(26,18,8,0.85)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '8px 12px', zIndex: 10
                   }}>
                     <p style={{ margin: 0, fontSize: '0.74rem', color: '#E8D8C8', fontWeight: 600 }}>
-                      Align customer receipt QR within the box
+                      {scanSuccess ? '✓ QR code detected!' : 'Align customer receipt QR inside box'}
                     </p>
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      style={{
+                        background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.25)',
+                        color: '#fff', borderRadius: '4px', padding: '3px 8px', fontSize: '0.7rem',
+                        fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px'
+                      }}
+                      title="Upload a photo of the QR code"
+                    >
+                      <ImageIcon size={12} /> Upload Photo
+                    </button>
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      accept="image/*"
+                      onChange={handleImageUpload}
+                      style={{ display: 'none' }}
+                    />
                   </div>
+
                   {cameraError && (
                     <div style={{
-                      position: 'absolute', inset: 0, background: 'rgba(26,18,8,0.92)',
+                      position: 'absolute', inset: 0, background: 'rgba(26,18,8,0.95)',
                       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                      padding: '16px', textAlign: 'center'
+                      padding: '16px', textAlign: 'center', zIndex: 20
                     }}>
                       <AlertTriangle style={{ color: '#F59E0B', marginBottom: '8px' }} size={24} />
-                      <p style={{ margin: 0, fontSize: '0.78rem', color: '#fff', maxWidth: '280px', lineHeight: 1.4 }}>
+                      <p style={{ margin: '0 0 10px 0', fontSize: '0.78rem', color: '#fff', maxWidth: '280px', lineHeight: 1.4 }}>
                         {cameraError}
                       </p>
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        style={{
+                          background: 'var(--color-brand-light)', color: '#fff', border: 'none',
+                          padding: '6px 12px', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700,
+                          cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px'
+                        }}
+                      >
+                        <ImageIcon size={13} /> Select QR from Gallery
+                      </button>
                     </div>
                   )}
                 </div>

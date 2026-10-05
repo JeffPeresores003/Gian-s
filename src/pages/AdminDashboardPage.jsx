@@ -21,6 +21,7 @@ import {
   Boxes,
   ShoppingBag,
   TrendingDown,
+  TrendingUp,
   ArrowUpDown,
   Layers,
   UtensilsCrossed,
@@ -28,6 +29,8 @@ import {
   Upload,
   FileSpreadsheet,
 } from 'lucide-react';
+import AdminOrderManagement from '../components/AdminOrderManagement';
+import AdminSalesReport from '../components/AdminSalesReport';
 
 const INITIAL_PRODUCT_FORM = {
   id: null,
@@ -664,6 +667,26 @@ export default function AdminDashboardPage() {
               {stocks.length}
             </span>
           </button>
+
+          <button
+            type="button"
+            className={`admin-subnav-btn ${activeTab === 'orders' ? 'active' : ''}`}
+            onClick={() => setActiveTab('orders')}
+            id="tab-admin-orders"
+          >
+            <ShoppingBag size={16} />
+            <span>Order History &amp; Edits</span>
+          </button>
+
+          <button
+            type="button"
+            className={`admin-subnav-btn ${activeTab === 'reports' ? 'active' : ''}`}
+            onClick={() => setActiveTab('reports')}
+            id="tab-admin-reports"
+          >
+            <TrendingUp size={16} />
+            <span>Sales Reports &amp; Analytics</span>
+          </button>
         </div>
       </div>
 
@@ -1128,6 +1151,12 @@ export default function AdminDashboardPage() {
           </div>
         </main>
       )}
+
+      {/* ─── TAB 3: ORDER HISTORY & OPERATIONS ──────────────── */}
+      {activeTab === 'orders' && <AdminOrderManagement products={products} />}
+
+      {/* ─── TAB 4: SALES REPORTS & ANALYTICS ───────────────── */}
+      {activeTab === 'reports' && <AdminSalesReport />}
 
       {/* ─── ADD/EDIT MENU PRODUCT MODAL ─────────────────────── */}
       {isModalOpen && (

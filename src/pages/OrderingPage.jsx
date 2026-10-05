@@ -26,7 +26,7 @@ function StepBar({ current }) {
   );
 }
 
-const FIXED_DELIVERY_FEE = 50.00;
+const FIXED_DELIVERY_FEE = 0.00;
 
 /* ─── Main Page ──────────────────────────────────────────────── */
 export default function OrderingPage() {
@@ -104,7 +104,7 @@ export default function OrderingPage() {
   const removeFromCart = (id) => setCart((prev) => prev.filter((i) => i.id !== id));
 
   const cartSubtotal = useMemo(() => cart.reduce((s, i) => s + i.price * i.quantity, 0), [cart]);
-  const cartTotal = useMemo(() => (cartSubtotal > 0 ? cartSubtotal + FIXED_DELIVERY_FEE : 0), [cartSubtotal]);
+  const cartTotal = useMemo(() => cartSubtotal, [cartSubtotal]);
   const cartCount = useMemo(() => cart.reduce((s, i) => s + i.quantity, 0), [cart]);
 
   // ── Step 0 → 1 ──
@@ -130,7 +130,7 @@ export default function OrderingPage() {
         customer_name: fullName.trim(),
         contact_number: contactNumber.trim(),
         delivery_address: deliveryAddress.trim(),
-        delivery_fee: FIXED_DELIVERY_FEE,
+        delivery_fee: 0,
         total_amount: cartTotal,
         notes: notes.trim() || null,
         items: cart.map((i) => ({
@@ -436,10 +436,6 @@ export default function OrderingPage() {
                   <span>₱{(item.price * item.quantity).toFixed(2)}</span>
                 </div>
               ))}
-              <div className="ordering-info-summary-row" style={{ color: 'var(--color-muted)' }}>
-                <span>Delivery Fee</span>
-                <span>₱{FIXED_DELIVERY_FEE.toFixed(2)}</span>
-              </div>
               <div className="ordering-info-summary-total">
                 <span>Total Amount Due</span>
                 <span>₱{cartTotal.toFixed(2)}</span>

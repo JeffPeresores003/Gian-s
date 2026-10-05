@@ -377,7 +377,7 @@ export default function TrackOrderPage() {
       y = drawDashedDivider(y);
 
       // ── Totals ──
-      const delFee = Number(order.delivery_fee || 50.0);
+      const delFee = Number(order.delivery_fee || 0);
       const calcSubtotal = itemsSubtotal > 0 ? itemsSubtotal : Math.max(0, Number(order.total_amount || 0) - delFee);
 
       ctx.font = '12px "Courier New", Courier, monospace';
@@ -389,13 +389,15 @@ export default function TrackOrderPage() {
       ctx.fillText(`\u20B1${calcSubtotal.toFixed(2)}`, canvasWidth - pad, y);
       y += 18;
 
-      ctx.fillStyle = '#555555';
-      ctx.textAlign = 'left';
-      ctx.fillText('Delivery Fee:', pad, y);
-      ctx.fillStyle = '#1A1A1A';
-      ctx.textAlign = 'right';
-      ctx.fillText(`\u20B1${delFee.toFixed(2)}`, canvasWidth - pad, y);
-      y += 20;
+      if (delFee > 0) {
+        ctx.fillStyle = '#555555';
+        ctx.textAlign = 'left';
+        ctx.fillText('Delivery Fee:', pad, y);
+        ctx.fillStyle = '#1A1A1A';
+        ctx.textAlign = 'right';
+        ctx.fillText(`\u20B1${delFee.toFixed(2)}`, canvasWidth - pad, y);
+        y += 20;
+      }
 
       // Final Total Due Row (dashed top & bottom lines)
       ctx.strokeStyle = '#888888';
@@ -649,7 +651,7 @@ export default function TrackOrderPage() {
                     <span className="trk-info-val">{order.rider_name}</span>
                   </div>
                 )}
-                {Boolean(order.delivery_fee) && (
+                {Number(order.delivery_fee) > 0 && (
                   <div className="trk-info-row trk-info-full">
                     <span className="trk-info-label">Delivery Fee</span>
                     <span className="trk-info-val">₱{Number(order.delivery_fee).toFixed(2)}</span>
