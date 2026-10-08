@@ -27,6 +27,7 @@ import {
 import api, { getImageUrl } from '../lib/api';
 import { useToast } from '../contexts/ToastContext';
 import { createQRCodeDataURL } from '../lib/qrcode';
+import FlavorModal, { hasFlavors, cartKeyOf, displayName } from '../components/FlavorModal';
 
 const FIXED_DELIVERY_FEE = 0.00;
 
@@ -48,6 +49,7 @@ export default function MenuPage() {
 
   // ─── Cart & Ordering System State ─────────────────────────────
   const [cart, setCart] = useState([]);
+  const [flavorProduct, setFlavorProduct] = useState(null);
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false);
   const [orderStep, setOrderStep] = useState(0); // 0: Cart Review, 1: Info, 2: Confirmation
 
@@ -138,29 +140,39 @@ export default function MenuPage() {
   const cartTotal = useMemo(() => cartSubtotal, [cartSubtotal]);
 
   // ─── Cart Handlers ─────────────────────────────────────────────
-  const addToCart = (product) => {
+  const addToCart = (product, flavor = null) => {
     if (!product.is_available) {
       addToast(`"${product.name}" is currently marked out of stock.`, 'info');
       return;
     }
 
+    // Prompt flavor modal if product has flavors and flavor is not yet selected
+    if (hasFlavors(product) && flavor === null) {
+      setFlavorProduct(product);
+      return;
+    }
+
+    const line = { ...product, flavor };
+    const key = cartKeyOf(line);
+
     setCart((prev) => {
-      const existing = prev.find((item) => item.id === product.id);
+      const existing = prev.find((item) => cartKeyOf(item) === key);
       if (existing) {
         return prev.map((item) =>
-          item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
+          cartKeyOf(item) === key ? { ...item, quantity: item.quantity + 1 } : item
         );
       }
-      return [...prev, { ...product, quantity: 1 }];
+      return [...prev, { ...line, quantity: 1 }];
     });
-    addToast(`Added "${product.name}" to your order!`, 'success');
+    const label = displayName(line);
+    addToast(`Added "${label}" to your order!`, 'success');
   };
 
-  const updateQuantity = (productId, delta) => {
+  const updateQuantity = (key, delta) => {
     setCart((prev) =>
       prev
         .map((item) => {
-          if (item.id === productId) {
+          if (cartKeyOf(item) === key) {
             const nextQty = item.quantity + delta;
             return nextQty > 0 ? { ...item, quantity: nextQty } : null;
           }
@@ -170,8 +182,8 @@ export default function MenuPage() {
     );
   };
 
-  const removeFromCart = (productId) => {
-    setCart((prev) => prev.filter((item) => item.id !== productId));
+  const removeFromCart = (key) => {
+    setCart((prev) => prev.filter((item) => cartKeyOf(item) !== key));
   };
 
   // ─── Submit Online Order ───────────────────────────────────────
@@ -198,6 +210,7 @@ export default function MenuPage() {
         items: cart.map((i) => ({
           product_id: i.id,
           product_name: i.name,
+          flavor: i.flavor || null,
           unit_price: i.price,
           quantity: i.quantity,
         })),
@@ -387,8 +400,8 @@ export default function MenuPage() {
 
         ctx.fillStyle = '#1A1A1A';
         ctx.textAlign = 'left';
-        const rawName = item.name || item.product_name;
-        const itemName = rawName.length > 20 ? rawName.substring(0, 18) + '..' : rawName;
+        const rawName = displayName(item);
+        const itemName = rawName.length > 22 ? rawName.substring(0, 20) + '..' : rawName;
         ctx.fillText(itemName, pad, y);
 
         ctx.textAlign = 'center';
@@ -695,7 +708,11 @@ export default function MenuPage() {
           <div className="menu-products-grid">
             {filteredProducts.map((product, idx) => {
               const isAvail = Boolean(product.is_available);
-              const inCart = cart.find((c) => c.id === product.id);
+              const flavored = hasFlavors(product);
+              const inCartQty = cart
+                .filter((c) => c.id === product.id)
+                .reduce((s, c) => s + c.quantity, 0);
+              const inCart = !flavored ? cart.find((c) => cartKeyOf(c) === cartKeyOf(product)) : null;
               const formattedPrice = Number(product.price).toLocaleString('en-PH', {
                 style: 'currency',
                 currency: 'PHP',
@@ -705,7 +722,7 @@ export default function MenuPage() {
                 <article
                   key={product.id}
                   id={`product-card-${product.id}`}
-                  className={`mpcard ${!isAvail ? 'mpcard-unavail' : ''} ${inCart ? 'mpcard-incart' : ''}`}
+                  className={`mpcard ${!isAvail ? 'mpcard-unavail' : ''} ${inCartQty > 0 ? 'mpcard-incart' : ''}`}
                   style={{ animationDelay: `${Math.min(idx * 45, 500)}ms` }}
                   onClick={() => isAvail && addToCart(product)}
                 >
@@ -739,10 +756,10 @@ export default function MenuPage() {
                       <span className="mpcard-cat-badge">{product.category}</span>
                     )}
 
-                    {inCart && isAvail && (
+                    {inCartQty > 0 && isAvail && (
                       <div className="mpcard-incart-badge">
                         <CheckCircle2 size={13} />
-                        <span>In Order</span>
+                        <span>In Order{flavored ? ` (${inCartQty})` : ''}</span>
                       </div>
                     )}
                   </div>
@@ -755,13 +772,21 @@ export default function MenuPage() {
                       <span className="mpcard-price">{formattedPrice}</span>
 
                       {isAvail ? (
-                        inCart ? (
+                        flavored ? (
+                          <button
+                            type="button"
+                            className="mpcard-add-btn"
+                            onClick={(e) => { e.stopPropagation(); addToCart(product); }}
+                          >
+                            <Plus size={12} /> {inCartQty > 0 ? `Add (${inCartQty})` : 'Choose Flavor'}
+                          </button>
+                        ) : inCart ? (
                           <div className="mpcard-qty" onClick={(e) => e.stopPropagation()}>
-                            <button type="button" onClick={() => updateQuantity(product.id, -1)}>
+                            <button type="button" onClick={() => updateQuantity(cartKeyOf(inCart), -1)}>
                               <Minus size={11} />
                             </button>
                             <span>{inCart.quantity}</span>
-                            <button type="button" onClick={() => updateQuantity(product.id, 1)}>
+                            <button type="button" onClick={() => updateQuantity(cartKeyOf(inCart), 1)}>
                               <Plus size={11} />
                             </button>
                           </div>
@@ -806,7 +831,7 @@ export default function MenuPage() {
       {/* ─── Order Checkout Modal ─────────────────────────────── */}
       {isOrderModalOpen && (
         <div className="modal-overlay" onClick={() => setIsOrderModalOpen(false)}>
-          <div className="order-drawer" onClick={(e) => e.stopPropagation()}>
+          <div className="order-drawer" style={{ maxWidth: '440px', width: '100%', margin: '0 auto' }} onClick={(e) => e.stopPropagation()}>
 
             {/* Header */}
             <div className="order-drawer-head">
@@ -853,19 +878,19 @@ export default function MenuPage() {
                   <>
                     <div className="cart-items-list">
                       {cart.map((item) => (
-                        <div key={item.id} className="cart-item-row">
+                        <div key={cartKeyOf(item)} className="cart-item-row">
                           <div className="cart-item-info">
-                            <span className="cart-item-name">{item.name}</span>
+                            <span className="cart-item-name">{displayName(item)}</span>
                             <span className="cart-item-unit">₱{Number(item.price).toFixed(2)} each</span>
                           </div>
                           <div className="cart-item-actions">
                             <div className="mpcard-qty">
-                              <button type="button" onClick={() => updateQuantity(item.id, -1)}><Minus size={11} /></button>
+                              <button type="button" onClick={() => updateQuantity(cartKeyOf(item), -1)}><Minus size={11} /></button>
                               <span>{item.quantity}</span>
-                              <button type="button" onClick={() => updateQuantity(item.id, 1)}><Plus size={11} /></button>
+                              <button type="button" onClick={() => updateQuantity(cartKeyOf(item), 1)}><Plus size={11} /></button>
                             </div>
                             <span className="cart-item-subtotal">₱{(item.price * item.quantity).toFixed(2)}</span>
-                            <button type="button" className="cart-item-remove" onClick={() => removeFromCart(item.id)}>
+                            <button type="button" className="cart-item-remove" onClick={() => removeFromCart(cartKeyOf(item))}>
                               <Trash2 size={14} />
                             </button>
                           </div>
@@ -1015,7 +1040,7 @@ export default function MenuPage() {
                       {confirmedOrder.items?.map((item, idx) => (
                         <div key={idx} className="ticket-item-row">
                           <span className="ticket-item-qty">{item.quantity}×</span>
-                          <span className="ticket-item-name">{item.name}</span>
+                          <span className="ticket-item-name">{displayName(item)}</span>
                           <span className="ticket-item-price">₱{(Number(item.price) * item.quantity).toFixed(2)}</span>
                         </div>
                       ))}
@@ -1074,6 +1099,17 @@ export default function MenuPage() {
             )}
           </div>
         </div>
+      )}
+      {/* Flavor picker modal */}
+      {flavorProduct && (
+        <FlavorModal
+          product={flavorProduct}
+          onClose={() => setFlavorProduct(null)}
+          onSelect={(flavor) => {
+            addToCart(flavorProduct, flavor);
+            setFlavorProduct(null);
+          }}
+        />
       )}
     </div>
   );

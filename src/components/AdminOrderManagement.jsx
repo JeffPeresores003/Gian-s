@@ -712,7 +712,7 @@ export default function AdminOrderManagement({ products = [] }) {
       {/* ── MODAL 1: EDIT ORDER (Admin unique function) ─────── */}
       {editOrder && (
         <div className="modal-overlay" onClick={() => setEditOrder(null)}>
-          <div className="modal-card" style={{ maxWidth: '720px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-card" style={{ maxWidth: '480px' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <div>
                 <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-brand-mid)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
@@ -729,7 +729,7 @@ export default function AdminOrderManagement({ products = [] }) {
 
             <form onSubmit={handleSaveEditSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               {/* Order Info Row */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '12px' }}>
                 <div>
                   <label className="form-label">Customer Name</label>
                   <input
@@ -1016,7 +1016,7 @@ export default function AdminOrderManagement({ products = [] }) {
       {/* ── MODAL 2: REFUND / MISSED DISCOUNT (Admin unique function) ── */}
       {refundOrder && (
         <div className="modal-overlay" onClick={() => setRefundOrder(null)}>
-          <div className="modal-card" style={{ maxWidth: '540px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-card" style={{ maxWidth: '440px' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <div>
                 <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#DC2626', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
@@ -1310,7 +1310,7 @@ export default function AdminOrderManagement({ products = [] }) {
       {/* ── MODAL 3: VIEW ORDER & AUDIT TIMELINE ───────────── */}
       {viewOrder && (
         <div className="modal-overlay" onClick={() => setViewOrder(null)}>
-          <div className="modal-card" style={{ maxWidth: '680px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-card" style={{ maxWidth: '480px' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <div>
                 <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-brand)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
@@ -1442,7 +1442,11 @@ export default function AdminOrderManagement({ products = [] }) {
       {/* ── MODAL 4: COMPACT RECEIPT POPUP (72mm Thermal Format) ─ */}
       {receiptOrder && (
         <div className="modal-overlay" onClick={() => setReceiptOrder(null)}>
-          <div className="modal-card receipt-card" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="modal-card receipt-card"
+            style={{ maxWidth: '360px', width: '100%', margin: '0 auto', padding: '16px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="receipt-paper" id="admin-printable-receipt">
               <div className="receipt-header">
                 <img

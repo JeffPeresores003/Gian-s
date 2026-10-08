@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useToast } from '../contexts/ToastContext';
 import api from '../lib/api';
 import * as XLSX from 'xlsx';
@@ -16,6 +16,7 @@ import {
   Banknote,
   Smartphone,
   Layers,
+  Filter,
 } from 'lucide-react';
 
 export default function AdminSalesReport() {
@@ -23,12 +24,21 @@ export default function AdminSalesReport() {
   const [reportDate, setReportDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [reportData, setReportData] = useState(null);
   const [loadingReport, setLoadingReport] = useState(false);
+
+  // Period View Filter: 'daily' | 'weekly' | 'monthly' | 'annually'
+  const [selectedPeriod, setSelectedPeriod] = useState('daily');
+
+  // Distribution Target Date (for Category & Payment Method breakdowns)
+  const [distributionDate, setDistributionDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [distributionData, setDistributionData] = useState(null);
+  const [loadingDist, setLoadingDist] = useState(false);
+  const distCacheRef = useRef({});
+
   const [lineGraphView, setLineGraphView] = useState('daily'); // 'daily' | 'monthly'
   const [pieGraphView, setPieGraphView] = useState('category'); // 'category' | 'dining'
   const [drilldownCategory, setDrilldownCategory] = useState(null);
-  const [categoryTimeframe, setCategoryTimeframe] = useState('daily'); // 'daily' | 'monthly' | 'annually'
 
-  // Fetch report data
+  // Fetch main report data
   const fetchSalesReport = async () => {
     setLoadingReport(true);
     try {
@@ -36,6 +46,7 @@ export default function AdminSalesReport() {
         params: { date: reportDate },
       });
       setReportData(res.data);
+      distCacheRef.current[reportDate] = res.data;
     } catch {
       addToast('Failed to load sales report.', 'error');
     } finally {
@@ -46,6 +57,60 @@ export default function AdminSalesReport() {
   useEffect(() => {
     fetchSalesReport();
   }, [reportDate]);
+
+  // Ultra-fast distribution data loader with in-memory caching and lightweight endpoint
+  useEffect(() => {
+    if (distributionDate === reportDate && reportData) {
+      setDistributionData(reportData);
+      setLoadingDist(false);
+      return;
+    }
+
+    if (distCacheRef.current[distributionDate]) {
+      setDistributionData(distCacheRef.current[distributionDate]);
+      setLoadingDist(false);
+      return;
+    }
+
+    if (distributionDate === reportDate && loadingReport) {
+      return;
+    }
+
+    let isMounted = true;
+    const fetchDist = async () => {
+      setLoadingDist(true);
+      try {
+        const res = await api.get('/reports/distribution', {
+          params: { date: distributionDate },
+        });
+        if (isMounted) {
+          distCacheRef.current[distributionDate] = res.data;
+          setDistributionData(res.data);
+        }
+      } catch {
+        if (isMounted) setDistributionData(reportData);
+      } finally {
+        if (isMounted) setLoadingDist(false);
+      }
+    };
+
+    fetchDist();
+    return () => {
+      isMounted = false;
+    };
+  }, [distributionDate, reportDate, reportData, loadingReport]);
+
+  // Active distribution dataset
+  const activeDist = distributionData || reportData;
+
+  // Sync lineGraphView when selectedPeriod changes
+  useEffect(() => {
+    if (selectedPeriod === 'annually') {
+      setLineGraphView('monthly');
+    } else {
+      setLineGraphView('daily');
+    }
+  }, [selectedPeriod]);
 
   // Line Graph Daily Waveform
   const lineDailyData = useMemo(() => {
@@ -85,6 +150,19 @@ export default function AdminSalesReport() {
     return days;
   }, [reportData, reportDate]);
 
+  // Line Graph Weekly Waveform (Days of the week Mon–Sun)
+  const lineWeeklyData = useMemo(() => {
+    if (reportData?.weekly_breakdown?.length) {
+      return reportData.weekly_breakdown.map((d) => ({
+        label: new Date(d.sale_date).toLocaleDateString('en-US', { weekday: 'short', day: 'numeric' }),
+        value: Number(d.revenue),
+        count: d.orders_count,
+        date: d.sale_date,
+      }));
+    }
+    return lineDailyData;
+  }, [reportData, lineDailyData]);
+
   // Line Graph Monthly Waveform
   const lineMonthlyData = useMemo(() => {
     if (!reportData?.monthly_breakdown) return [];
@@ -100,61 +178,49 @@ export default function AdminSalesReport() {
       });
   }, [reportData]);
 
-  // Product Category breakdown for Pie Graph (Daily / Monthly / Annually)
+  // Product Category breakdown for Pie Graph (specific to distributionDate)
   const pieCategoryData = useMemo(() => {
-    if (!reportData) return [];
-    let list = [];
-    if (categoryTimeframe === 'daily') {
-      list = reportData.category_breakdown_daily || [];
-    } else if (categoryTimeframe === 'annually') {
-      list = reportData.category_breakdown_yearly || [];
-    } else {
-      list = reportData.category_breakdown_monthly || reportData.category_breakdown || [];
-    }
+    if (!activeDist) return [];
+    const list = activeDist.category_breakdown_daily || activeDist.category_breakdown || [];
     return list.map((c) => ({
       label: c.category,
       value: Number(c.total),
       count: c.items_sold,
     }));
-  }, [reportData, categoryTimeframe]);
+  }, [activeDist]);
 
-  // Payment Method breakdown for Pie Graph
+  // Payment Method breakdown for Pie Graph (specific to distributionDate)
   const piePaymentData = useMemo(() => {
-    if (!reportData?.payment_methods) return [];
-    return reportData.payment_methods.map((p) => ({
-      label: p.method.toUpperCase(),
+    if (!activeDist) return [];
+    const list = activeDist.payment_methods_daily || activeDist.payment_methods || [];
+    return list.map((p) => ({
+      label: (p.method || 'Unknown').toUpperCase(),
       value: Number(p.total),
       count: p.count,
     }));
-  }, [reportData]);
+  }, [activeDist]);
 
-  // Dining Type breakdown for Pie Graph
+  // Dining Type breakdown for Pie Graph (specific to distributionDate)
   const pieDiningData = useMemo(() => {
-    if (!reportData?.order_types) return [];
-    return reportData.order_types.map((o) => ({
+    if (!activeDist) return [];
+    const list = activeDist.order_types_daily || activeDist.order_types || [];
+    return list.map((o) => ({
       label: o.type === 'dine-in' ? 'Dine In' : o.type === 'online' ? 'Online' : 'Take Out',
       value: Number(o.total),
       count: o.count,
     }));
-  }, [reportData]);
+  }, [activeDist]);
 
-  // Top products for drilldown category (Daily / Monthly / Annually)
+  // Top products for drilldown category (specific to distributionDate)
   const categoryTopProducts = useMemo(() => {
-    if (!drilldownCategory || !reportData) return [];
-    let list = [];
-    if (categoryTimeframe === 'daily') {
-      list = reportData.product_breakdown_daily || [];
-    } else if (categoryTimeframe === 'annually') {
-      list = reportData.product_breakdown_yearly || [];
-    } else {
-      list = reportData.product_breakdown_monthly || reportData.product_breakdown || [];
-    }
+    if (!drilldownCategory || !activeDist) return [];
+    const list = activeDist.product_breakdown_daily || activeDist.product_breakdown || [];
     return list
       .filter((p) => p.category?.toLowerCase() === drilldownCategory.toLowerCase())
       .sort((a, b) => Number(b.total) - Number(a.total));
-  }, [drilldownCategory, reportData, categoryTimeframe]);
+  }, [drilldownCategory, activeDist]);
 
-  // Daily money breakdown by payment method (Task 4)
+  // Money breakdown by payment method for the selected target date
   const dailyPaymentBreakdown = useMemo(() => {
     if (!reportData?.payment_daily) return [];
     const dateStr = reportDate;
@@ -178,37 +244,89 @@ export default function AdminSalesReport() {
     return dailyPaymentBreakdown.reduce((sum, item) => sum + item.total, 0);
   }, [dailyPaymentBreakdown]);
 
-  // Export to Excel
+  // Export to Excel (With Profit Gain & Margin; No Avg Ticket)
   const exportSalesReportExcel = () => {
     if (!reportData) return;
 
     const wb = XLSX.utils.book_new();
 
     const summaryData = [
-      ['Period', 'Revenue (₱)', 'Orders', 'Avg Ticket (₱)'],
-      ['Day (' + reportDate + ')',
-        reportData.day.revenue.toFixed(2), reportData.day.orders, reportData.day.avg_ticket.toFixed(2)],
-      ['Week (Mon–Sun)',
-        reportData.week.revenue.toFixed(2), reportData.week.orders, reportData.week.avg_ticket.toFixed(2)],
-      ['Month (' + new Date(reportDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) + ')',
-        reportData.month.revenue.toFixed(2), reportData.month.orders, reportData.month.avg_ticket.toFixed(2)],
-      ['Year (' + new Date(reportDate).getFullYear() + ')',
-        reportData.year.revenue.toFixed(2), reportData.year.orders, reportData.year.avg_ticket.toFixed(2)],
+      ['Period', 'Revenue (₱)', 'Orders', 'Profit Gain (₱)', 'Margin (%)'],
+      [
+        'Day (' + reportDate + ')',
+        reportData.day.revenue.toFixed(2),
+        reportData.day.orders,
+        (reportData.day.profit ?? 0).toFixed(2),
+        (reportData.day.profit_margin ?? 0).toFixed(1) + '%',
+      ],
+      [
+        'Week (Mon–Sun)',
+        (reportData.week?.revenue ?? 0).toFixed(2),
+        reportData.week?.orders ?? 0,
+        (reportData.week?.profit ?? 0).toFixed(2),
+        (reportData.week?.profit_margin ?? 0).toFixed(1) + '%',
+      ],
+      [
+        'Month (' + new Date(reportDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) + ')',
+        reportData.month.revenue.toFixed(2),
+        reportData.month.orders,
+        (reportData.month.profit ?? 0).toFixed(2),
+        (reportData.month.profit_margin ?? 0).toFixed(1) + '%',
+      ],
+      [
+        'Year (' + new Date(reportDate).getFullYear() + ')',
+        reportData.year.revenue.toFixed(2),
+        reportData.year.orders,
+        (reportData.year.profit ?? 0).toFixed(2),
+        (reportData.year.profit_margin ?? 0).toFixed(1) + '%',
+      ],
     ];
     const ws1 = XLSX.utils.aoa_to_sheet(summaryData);
-    XLSX.utils.book_append_sheet(wb, ws1, 'Summary');
+    XLSX.utils.book_append_sheet(wb, ws1, 'Summary & Profits');
 
-    if (reportData.daily_breakdown.length > 0) {
+    if (reportData.daily_breakdown?.length > 0) {
       const dailyData = [
-        ['Date', 'Orders', 'Revenue (₱)'],
+        ['Date', 'Orders', 'Revenue (₱)', 'Profit Gain (₱)', 'Margin (%)'],
         ...reportData.daily_breakdown.map((d) => [
           new Date(d.sale_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
           d.orders_count,
           Number(d.revenue).toFixed(2),
+          Number(d.profit ?? 0).toFixed(2),
+          (Number(d.profit_margin ?? 0)).toFixed(1) + '%',
         ]),
       ];
       const ws2 = XLSX.utils.aoa_to_sheet(dailyData);
       XLSX.utils.book_append_sheet(wb, ws2, 'Daily Breakdown');
+    }
+
+    if (reportData.weekly_breakdown?.length > 0) {
+      const weekData = [
+        ['Date', 'Orders', 'Revenue (₱)', 'Profit Gain (₱)', 'Margin (%)'],
+        ...reportData.weekly_breakdown.map((d) => [
+          new Date(d.sale_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
+          d.orders_count,
+          Number(d.revenue).toFixed(2),
+          Number(d.profit ?? 0).toFixed(2),
+          (Number(d.profit_margin ?? 0)).toFixed(1) + '%',
+        ]),
+      ];
+      const wsWeek = XLSX.utils.aoa_to_sheet(weekData);
+      XLSX.utils.book_append_sheet(wb, wsWeek, 'Weekly Breakdown');
+    }
+
+    if (reportData.monthly_breakdown?.length > 0) {
+      const monthData = [
+        ['Month', 'Orders', 'Revenue (₱)', 'Profit Gain (₱)', 'Margin (%)'],
+        ...reportData.monthly_breakdown.map((m) => [
+          new Date(2026, m.sale_month - 1, 1).toLocaleDateString('en-US', { month: 'long' }),
+          m.orders_count,
+          Number(m.revenue).toFixed(2),
+          Number(m.profit ?? 0).toFixed(2),
+          (Number(m.profit_margin ?? 0)).toFixed(1) + '%',
+        ]),
+      ];
+      const wsMonth = XLSX.utils.aoa_to_sheet(monthData);
+      XLSX.utils.book_append_sheet(wb, wsMonth, 'Monthly Breakdown');
     }
 
     if (reportData.product_breakdown?.length > 0) {
@@ -236,22 +354,43 @@ export default function AdminSalesReport() {
       {/* ── Top Header ────────────────────────────────────── */}
       <div className="pos-history-top" style={{ marginBottom: '24px' }}>
         <div>
-          <h1 className="admin-page-title" style={{ margin: '0 0 4px 0' }}>Sales &amp; Earnings Reports</h1>
+          <h1 className="admin-page-title" style={{ margin: '0 0 4px 0' }}>Sales &amp; Profits Reports</h1>
           <p className="admin-page-sub" style={{ margin: 0 }}>
-            Inspect daily, weekly, monthly and annual revenue. Online orders record in sales only when marked delivered.
+            Inspect daily, weekly, monthly and annual revenue and profit gain. Online orders record in sales when marked delivered.
           </p>
         </div>
 
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Target Date Input */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--color-brand)' }}>Target Date:</span>
             <input
               type="date"
               className="pos-date-picker"
               value={reportDate}
-              onChange={(e) => setReportDate(e.target.value)}
+              onChange={(e) => {
+                setReportDate(e.target.value);
+                setDistributionDate(e.target.value);
+              }}
               id="admin-report-date-picker"
             />
+          </div>
+
+          {/* Period Dropdown (Daily | Weekly | Monthly | Annually) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--color-brand)' }}>Period:</span>
+            <select
+              className="pos-date-picker"
+              value={selectedPeriod}
+              onChange={(e) => setSelectedPeriod(e.target.value)}
+              id="admin-report-period-dropdown"
+              style={{ fontWeight: 600, minWidth: '120px' }}
+            >
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+              <option value="annually">Annually</option>
+            </select>
           </div>
 
           <button
@@ -284,64 +423,98 @@ export default function AdminSalesReport() {
         </div>
       ) : reportData ? (
         <>
-          {/* 4 Metric Summary Cards: Day / Week / Month / Year */}
-          <div className="pos-reports-grid">
-            <div className="pos-metric-card">
-              <div className="pos-metric-badge day">Day Report ({reportDate})</div>
-              <div className="pos-metric-amount">
-                ₱{reportData.day.revenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          {/* ── Metric Summary Cards Filtered by selectedPeriod ── */}
+          <div className="pos-reports-grid" style={{ marginBottom: '24px' }}>
+            {/* Daily Card */}
+            {selectedPeriod === 'daily' && (
+              <div className="pos-metric-card" style={{ borderLeft: '4px solid #16a34a' }}>
+                <div className="pos-metric-badge day">Day Report ({reportDate})</div>
+                <div className="pos-metric-amount">
+                  ₱{reportData.day.revenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div className="pos-metric-details">
+                  <span><strong>{reportData.day.orders}</strong> orders placed</span>
+                  <span style={{ color: '#16a34a', fontWeight: 700 }}>
+                    Profit Gain: <strong>₱{(reportData.day.profit ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> ({(reportData.day.profit_margin ?? 0).toFixed(1)}% margin)
+                  </span>
+                </div>
               </div>
-              <div className="pos-metric-details">
-                <span><strong>{reportData.day.orders}</strong> orders placed</span>
-                <span>Avg. Ticket: <strong>₱{reportData.day.avg_ticket.toFixed(2)}</strong></span>
-              </div>
-            </div>
+            )}
 
-            <div className="pos-metric-card">
-              <div className="pos-metric-badge week">Week Report (Mon–Sun)</div>
-              <div className="pos-metric-amount">
-                ₱{(reportData.week?.revenue ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {/* Weekly Card */}
+            {selectedPeriod === 'weekly' && (
+              <div className="pos-metric-card" style={{ borderLeft: '4px solid #0284c7' }}>
+                <div className="pos-metric-badge week">Week Report (Mon–Sun)</div>
+                <div className="pos-metric-amount">
+                  ₱{(reportData.week?.revenue ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div className="pos-metric-details">
+                  <span><strong>{reportData.week?.orders ?? 0}</strong> orders this week</span>
+                  <span style={{ color: '#16a34a', fontWeight: 700 }}>
+                    Profit Gain: <strong>₱{(reportData.week?.profit ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> ({(reportData.week?.profit_margin ?? 0).toFixed(1)}% margin)
+                  </span>
+                </div>
               </div>
-              <div className="pos-metric-details">
-                <span><strong>{reportData.week?.orders ?? 0}</strong> orders this week</span>
-                <span>Avg. Ticket: <strong>₱{(reportData.week?.avg_ticket ?? 0).toFixed(2)}</strong></span>
-              </div>
-            </div>
+            )}
 
-            <div className="pos-metric-card">
-              <div className="pos-metric-badge month">
-                Month Report ({new Date(reportDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })})
+            {/* Monthly Card */}
+            {selectedPeriod === 'monthly' && (
+              <div className="pos-metric-card" style={{ borderLeft: '4px solid var(--color-brand)' }}>
+                <div className="pos-metric-badge month">
+                  Month Report ({new Date(reportDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })})
+                </div>
+                <div className="pos-metric-amount">
+                  ₱{reportData.month.revenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div className="pos-metric-details">
+                  <span><strong>{reportData.month.orders}</strong> total orders</span>
+                  <span style={{ color: '#16a34a', fontWeight: 700 }}>
+                    Profit Gain: <strong>₱{(reportData.month.profit ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> ({(reportData.month.profit_margin ?? 0).toFixed(1)}% margin)
+                  </span>
+                </div>
               </div>
-              <div className="pos-metric-amount">
-                ₱{reportData.month.revenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </div>
-              <div className="pos-metric-details">
-                <span><strong>{reportData.month.orders}</strong> total orders</span>
-                <span>Avg. Ticket: <strong>₱{reportData.month.avg_ticket.toFixed(2)}</strong></span>
-              </div>
-            </div>
+            )}
 
-            <div className="pos-metric-card">
-              <div className="pos-metric-badge year">
-                Year Report ({new Date(reportDate).getFullYear()})
+            {/* Annual Card */}
+            {selectedPeriod === 'annually' && (
+              <div className="pos-metric-card" style={{ borderLeft: '4px solid #d97706' }}>
+                <div className="pos-metric-badge year">
+                  Year Report ({new Date(reportDate).getFullYear()})
+                </div>
+                <div className="pos-metric-amount">
+                  ₱{reportData.year.revenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div className="pos-metric-details">
+                  <span><strong>{reportData.year.orders}</strong> annual orders</span>
+                  <span style={{ color: '#16a34a', fontWeight: 700 }}>
+                    Profit Gain: <strong>₱{(reportData.year.profit ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> ({(reportData.year.profit_margin ?? 0).toFixed(1)}% margin)
+                  </span>
+                </div>
               </div>
-              <div className="pos-metric-amount">
-                ₱{reportData.year.revenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </div>
-              <div className="pos-metric-details">
-                <span><strong>{reportData.year.orders}</strong> annual orders</span>
-                <span>Avg. Ticket: <strong>₱{reportData.year.avg_ticket.toFixed(2)}</strong></span>
-              </div>
-            </div>
+            )}
           </div>
 
           {/* ── Visual Analytics (Line & Pie Graphs) ── */}
           <div className="pos-charts-section">
             <LineGraph
-              data={lineGraphView === 'daily' ? lineDailyData : lineMonthlyData}
-              title={lineGraphView === 'daily' ? 'Daily Revenue Trajectory' : 'Annual Monthly Revenue Trend'}
+              data={
+                selectedPeriod === 'weekly'
+                  ? lineWeeklyData
+                  : lineGraphView === 'daily'
+                  ? lineDailyData
+                  : lineMonthlyData
+              }
+              title={
+                selectedPeriod === 'weekly'
+                  ? 'Weekly Daily Revenue Trajectory'
+                  : lineGraphView === 'daily'
+                  ? 'Daily Revenue Trajectory'
+                  : 'Annual Monthly Revenue Trend'
+              }
               subtitle={
-                lineGraphView === 'daily'
+                selectedPeriod === 'weekly'
+                  ? 'Day-by-day velocity for this week (Mon–Sun)'
+                  : lineGraphView === 'daily'
                   ? `Day-by-day revenue velocity for ${new Date(reportDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}`
                   : `Annual overview for calendar year ${new Date(reportDate).getFullYear()}`
               }
@@ -354,255 +527,437 @@ export default function AdminSalesReport() {
                     className={`chart-pill-btn ${lineGraphView === 'daily' ? 'active' : ''}`}
                     onClick={() => setLineGraphView('daily')}
                   >
-                    Daily View ({new Date(reportDate).toLocaleDateString('en-US', { month: 'short' })})
+                    Daily View
                   </button>
                   <button
                     type="button"
                     className={`chart-pill-btn ${lineGraphView === 'monthly' ? 'active' : ''}`}
                     onClick={() => setLineGraphView('monthly')}
                   >
-                    Monthly View ({new Date(reportDate).getFullYear()})
+                    Monthly View
                   </button>
                 </div>
               }
             />
 
-            <div className="pos-charts-row">
-              {/* Category Breakdown Donut (Clickable - Task 4) */}
-              {/* Category Breakdown Donut with Daily / Monthly / Annually Buttons */}
-              <PieGraph
-                data={pieCategoryData}
-                title="Revenue by Product Category"
-                subtitle={`Breakdown (${categoryTimeframe === 'daily' ? new Date(reportDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : categoryTimeframe === 'monthly' ? new Date(reportDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : new Date(reportDate).getFullYear()}). Click any category to view top products.`}
-                donut={true}
-                onItemClick={(slice) => setDrilldownCategory(slice.label)}
-                selectedLabel={drilldownCategory}
-                colorPalette={[
-                  '#C48B3F',
-                  '#2C1810',
-                  '#16A34A',
-                  '#D4A96A',
-                  '#4F46E5',
-                  '#DC2626',
-                  '#0284C7',
-                ]}
-                headerActions={
-                  <div className="chart-pill-toggles">
-                    <button
-                      type="button"
-                      className={`chart-pill-btn ${categoryTimeframe === 'daily' ? 'active' : ''}`}
-                      onClick={() => setCategoryTimeframe('daily')}
-                    >
-                      Daily
-                    </button>
-                    <button
-                      type="button"
-                      className={`chart-pill-btn ${categoryTimeframe === 'monthly' ? 'active' : ''}`}
-                      onClick={() => setCategoryTimeframe('monthly')}
-                    >
-                      Monthly
-                    </button>
-                    <button
-                      type="button"
-                      className={`chart-pill-btn ${categoryTimeframe === 'annually' ? 'active' : ''}`}
-                      onClick={() => setCategoryTimeframe('annually')}
-                    >
-                      Annually
-                    </button>
-                  </div>
-                }
-              />
-
-              {/* Payment Method & Dining Preference Breakdown */}
-              <PieGraph
-                data={pieGraphView === 'category' ? piePaymentData : pieDiningData}
-                title={pieGraphView === 'category' ? 'Payment Method Distribution' : 'Dining Preference Breakdown'}
-                subtitle={
-                  pieGraphView === 'category'
-                    ? 'Volume split by Cash, GCash, and Card tender'
-                    : 'Customer order distribution between Dine-In, Online and Take-Out'
-                }
-                donut={true}
-                colorPalette={[
-                  '#16A34A',
-                  '#0284C7',
-                  '#4F46E5',
-                  '#D97706',
-                ]}
-                headerActions={
-                  <div className="chart-pill-toggles">
-                    <button
-                      type="button"
-                      className={`chart-pill-btn ${pieGraphView === 'category' ? 'active' : ''}`}
-                      onClick={() => setPieGraphView('category')}
-                    >
-                      Payment Method
-                    </button>
-                    <button
-                      type="button"
-                      className={`chart-pill-btn ${pieGraphView === 'dining' ? 'active' : ''}`}
-                      onClick={() => setPieGraphView('dining')}
-                    >
-                      Dining Type
-                    </button>
-                  </div>
-                }
-              />
-            </div>
-
-            {/* Daily Money Breakdown by Payment Method (Task 4) */}
-            <div className="pos-breakdown-card" style={{ marginTop: '20px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
-                <div>
-                  <h3 className="pos-breakdown-title" style={{ margin: 0 }}>
-                    Daily Money Breakdown &bull; {new Date(reportDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
-                  </h3>
-                  <p style={{ margin: '2px 0 0 0', fontSize: '0.82rem', color: 'var(--color-muted)' }}>
-                    Exact money earned today split by GCash, Cash, and Card tender
-                  </p>
-                </div>
-                <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--color-brand)', background: 'var(--color-cream)', padding: '5px 12px', borderRadius: '20px', border: '1px solid var(--color-border)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                  <TrendingUp size={14} color="var(--color-brand)" /> Day Total Earned: ₱{dailyTotalMoney.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
+            {/* ── Revenue by Category & Payment Method Header with Target Date (Task 3) ── */}
+            <div
+              style={{
+                marginTop: '28px',
+                marginBottom: '12px',
+                padding: '14px 18px',
+                background: 'var(--color-cream)',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--color-border)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '12px',
+              }}
+            >
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--color-brand)' }}>
+                  Category &amp; Payment Method Distribution
+                </h3>
+                <p style={{ margin: '2px 0 0 0', fontSize: '0.82rem', color: 'var(--color-muted)' }}>
+                  Viewing breakdown specifically for: <strong>{new Date(distributionDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</strong>
+                </p>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
-                {dailyPaymentBreakdown.map((pm) => (
-                  <div
-                    key={pm.method}
-                    style={{
-                      background: pm.bg,
-                      border: `1.5px solid ${pm.color}33`,
-                      borderRadius: 'var(--radius-md)',
-                      padding: '16px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '14px',
-                    }}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--color-brand)' }}>
+                  Target Date:
+                </span>
+                <input
+                  type="date"
+                  className="pos-date-picker"
+                  value={distributionDate}
+                  onChange={(e) => setDistributionDate(e.target.value)}
+                  id="admin-dist-date-picker"
+                />
+                {distributionDate !== reportDate && (
+                  <button
+                    type="button"
+                    className="btn-pos-aux"
+                    onClick={() => setDistributionDate(reportDate)}
+                    style={{ fontSize: '0.78rem', padding: '5px 10px' }}
+                    title="Sync with main report date"
                   >
+                    Reset to Report Date
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {loadingDist ? (
+              <div className="state-center" style={{ minHeight: '180px' }}>
+                <Loader2 className="spinner" size={24} />
+                <p className="state-sub">Loading distribution for {distributionDate}...</p>
+              </div>
+            ) : (
+              <div className="pos-charts-row">
+                {/* Category Breakdown Donut */}
+                <PieGraph
+                  data={pieCategoryData}
+                  title="Revenue by Product Category"
+                  subtitle={`Breakdown for ${new Date(distributionDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}. Click any category to view top products.`}
+                  donut={true}
+                  onItemClick={(slice) => setDrilldownCategory(slice.label)}
+                  selectedLabel={drilldownCategory}
+                  colorPalette={[
+                    '#C48B3F',
+                    '#2C1810',
+                    '#16A34A',
+                    '#D4A96A',
+                    '#4F46E5',
+                    '#DC2626',
+                    '#0284C7',
+                  ]}
+                />
+
+                {/* Payment Method Distribution */}
+                <PieGraph
+                  data={pieGraphView === 'category' ? piePaymentData : pieDiningData}
+                  title={pieGraphView === 'category' ? 'Payment Method Distribution' : 'Dining Preference Breakdown'}
+                  subtitle={
+                    pieGraphView === 'category'
+                      ? `Volume split by Cash, GCash, and Card on ${new Date(distributionDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                      : `Order preference on ${new Date(distributionDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                  }
+                  donut={true}
+                  colorPalette={[
+                    '#16A34A',
+                    '#0284C7',
+                    '#4F46E5',
+                    '#D97706',
+                  ]}
+                  headerActions={
+                    <div className="chart-pill-toggles">
+                      <button
+                        type="button"
+                        className={`chart-pill-btn ${pieGraphView === 'category' ? 'active' : ''}`}
+                        onClick={() => setPieGraphView('category')}
+                      >
+                        Payment Method
+                      </button>
+                      <button
+                        type="button"
+                        className={`chart-pill-btn ${pieGraphView === 'dining' ? 'active' : ''}`}
+                        onClick={() => setPieGraphView('dining')}
+                      >
+                        Dining Type
+                      </button>
+                    </div>
+                  }
+                />
+              </div>
+            )}
+
+            {/* Daily Money Breakdown by Payment Method */}
+            {selectedPeriod === 'daily' && (
+              <div className="pos-breakdown-card" style={{ marginTop: '20px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                  <div>
+                    <h3 className="pos-breakdown-title" style={{ margin: 0 }}>
+                      Daily Money Breakdown &bull; {new Date(reportDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                    </h3>
+                    <p style={{ margin: '2px 0 0 0', fontSize: '0.82rem', color: 'var(--color-muted)' }}>
+                      Exact money earned today split by GCash, Cash, and Card tender
+                    </p>
+                  </div>
+                  <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--color-brand)', background: 'var(--color-cream)', padding: '5px 12px', borderRadius: '20px', border: '1px solid var(--color-border)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                    <TrendingUp size={14} color="var(--color-brand)" /> Day Total Earned: ₱{dailyTotalMoney.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
+                  {dailyPaymentBreakdown.map((pm) => (
                     <div
+                      key={pm.method}
                       style={{
-                        background: '#fff',
-                        width: '46px',
-                        height: '46px',
-                        borderRadius: '50%',
+                        background: pm.bg,
+                        border: `1.5px solid ${pm.color}33`,
+                        borderRadius: 'var(--radius-md)',
+                        padding: '16px',
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'center',
-                        boxShadow: '0 2px 6px rgba(0,0,0,0.08)',
-                        color: pm.color,
+                        gap: '14px',
                       }}
                     >
-                      {pm.method === 'cash' && <Banknote size={22} color={pm.color} />}
-                      {pm.method === 'gcash' && <Smartphone size={22} color={pm.color} />}
-                      {pm.method === 'card' && <CreditCard size={22} color={pm.color} />}
+                      <div
+                        style={{
+                          background: '#fff',
+                          width: '46px',
+                          height: '46px',
+                          borderRadius: '50%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          boxShadow: '0 2px 6px rgba(0,0,0,0.08)',
+                          color: pm.color,
+                        }}
+                      >
+                        {pm.method === 'cash' && <Banknote size={22} color={pm.color} />}
+                        {pm.method === 'gcash' && <Smartphone size={22} color={pm.color} />}
+                        {pm.method === 'card' && <CreditCard size={22} color={pm.color} />}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: pm.color, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                          {pm.label}
+                        </div>
+                        <div style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--color-brand)', fontFamily: 'var(--font-sans)', margin: '2px 0' }}>
+                          ₱{pm.total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                        <div style={{ fontSize: '0.8rem', color: 'var(--color-muted)' }}>
+                          <strong>{pm.count}</strong> transactions ({dailyTotalMoney > 0 ? ((pm.total / dailyTotalMoney) * 100).toFixed(1) : 0}%)
+                        </div>
+                      </div>
                     </div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: '0.78rem', fontWeight: 700, color: pm.color, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                        {pm.label}
-                      </div>
-                      <div style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--color-brand)', fontFamily: 'var(--font-sans)', margin: '2px 0' }}>
-                        ₱{pm.total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
-                      <div style={{ fontSize: '0.8rem', color: 'var(--color-muted)' }}>
-                        <strong>{pm.count}</strong> transactions ({dailyTotalMoney > 0 ? ((pm.total / dailyTotalMoney) * 100).toFixed(1) : 0}%)
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
-          {/* Daily Breakdown for Selected Month Table */}
+          {/* ── Breakdown Tables Filtered by selectedPeriod ── */}
           <div className="pos-breakdown-section" style={{ marginTop: '24px' }}>
-            <div className="pos-breakdown-card">
-              <h3 className="pos-breakdown-title">
-                Daily Revenue Breakdown &bull; {new Date(reportDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-              </h3>
-              {reportData.daily_breakdown.length === 0 ? (
-                <p style={{ color: 'var(--color-muted)', fontSize: '0.88rem' }}>No orders logged for this month yet.</p>
-              ) : (
-                <div style={{ overflowX: 'auto' }}>
-                  <table className="admin-table">
-                    <thead>
-                      <tr>
-                        <th>Date</th>
-                        <th>Total Orders</th>
-                        <th style={{ textAlign: 'right' }}>Revenue Gained</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {reportData.daily_breakdown.map((d, i) => (
-                        <tr key={i}>
-                          <td>
-                            {new Date(d.sale_date).toLocaleDateString('en-US', {
-                              weekday: 'short',
-                              month: 'short',
-                              day: 'numeric',
-                            })}
-                          </td>
-                          <td>{d.orders_count} orders</td>
-                          <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--color-brand)' }}>
-                            ₱{Number(d.revenue).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </td>
+            {/* 1. Daily Reports Only */}
+            {selectedPeriod === 'daily' && (
+              <div className="pos-breakdown-card">
+                <h3 className="pos-breakdown-title">
+                  Daily Revenue &amp; Profit Breakdown &bull; {new Date(reportDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                </h3>
+                {reportData.daily_breakdown.length === 0 ? (
+                  <p style={{ color: 'var(--color-muted)', fontSize: '0.88rem' }}>No orders logged for this month yet.</p>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="admin-table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Total Orders</th>
+                          <th style={{ textAlign: 'right' }}>Revenue Gained</th>
+                          <th style={{ textAlign: 'right' }}>Profit Gained</th>
+                          <th style={{ textAlign: 'center' }}>Margin %</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
+                      </thead>
+                      <tbody>
+                        {reportData.daily_breakdown.map((d, i) => {
+                          const isSelectedDay = d.sale_date === reportDate;
+                          return (
+                            <tr key={i} style={{ background: isSelectedDay ? 'rgba(196, 139, 63, 0.08)' : undefined }}>
+                              <td>
+                                <strong style={{ color: isSelectedDay ? 'var(--color-brand)' : undefined }}>
+                                  {new Date(d.sale_date).toLocaleDateString('en-US', {
+                                    weekday: 'short',
+                                    month: 'short',
+                                    day: 'numeric',
+                                  })}
+                                </strong>
+                                {isSelectedDay && (
+                                  <span style={{ marginLeft: '8px', fontSize: '0.72rem', background: 'var(--color-brand)', color: '#fff', padding: '2px 6px', borderRadius: '10px' }}>
+                                    Selected
+                                  </span>
+                                )}
+                              </td>
+                              <td>{d.orders_count} orders</td>
+                              <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--color-brand)' }}>
+                                ₱{Number(d.revenue).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                              <td style={{ textAlign: 'right', fontWeight: 700, color: '#16a34a' }}>
+                                ₱{Number(d.profit ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                              <td style={{ textAlign: 'center' }}>
+                                <span style={{ padding: '2px 8px', borderRadius: '12px', fontSize: '0.78rem', fontWeight: 700, background: 'rgba(22, 163, 74, 0.1)', color: '#16a34a' }}>
+                                  {(Number(d.profit_margin ?? 0)).toFixed(1)}%
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
 
-            {/* Monthly Breakdown for Current Year */}
-            <div className="pos-breakdown-card">
-              <h3 className="pos-breakdown-title">
-                Monthly Revenue Breakdown &bull; {new Date(reportDate).getFullYear()}
-              </h3>
-              {reportData.monthly_breakdown.length === 0 ? (
-                <p style={{ color: 'var(--color-muted)', fontSize: '0.88rem' }}>No orders logged for this year yet.</p>
-              ) : (
-                <div style={{ overflowX: 'auto' }}>
-                  <table className="admin-table">
-                    <thead>
-                      <tr>
-                        <th>Month</th>
-                        <th>Total Orders</th>
-                        <th style={{ textAlign: 'right' }}>Revenue Gained</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {reportData.monthly_breakdown.map((m, i) => {
-                        const monthName = new Date(2026, m.sale_month - 1, 1).toLocaleDateString('en-US', {
-                          month: 'long',
-                        });
-                        return (
+            {/* 2. Weekly Reports Only */}
+            {selectedPeriod === 'weekly' && (
+              <div className="pos-breakdown-card">
+                <h3 className="pos-breakdown-title">
+                  Weekly Revenue &amp; Profit Breakdown &bull; Mon–Sun of Current Week
+                </h3>
+                {(!reportData.weekly_breakdown || reportData.weekly_breakdown.length === 0) ? (
+                  <p style={{ color: 'var(--color-muted)', fontSize: '0.88rem' }}>No orders logged for this week yet.</p>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="admin-table">
+                      <thead>
+                        <tr>
+                          <th>Day of Week</th>
+                          <th>Total Orders</th>
+                          <th style={{ textAlign: 'right' }}>Revenue Gained</th>
+                          <th style={{ textAlign: 'right' }}>Profit Gained</th>
+                          <th style={{ textAlign: 'center' }}>Margin %</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reportData.weekly_breakdown.map((d, i) => {
+                          const isTarget = d.sale_date === reportDate;
+                          return (
+                            <tr key={i} style={{ background: isTarget ? 'rgba(196, 139, 63, 0.08)' : undefined }}>
+                              <td>
+                                <strong>
+                                  {new Date(d.sale_date).toLocaleDateString('en-US', {
+                                    weekday: 'long',
+                                    month: 'short',
+                                    day: 'numeric',
+                                  })}
+                                </strong>
+                                {isTarget && (
+                                  <span style={{ marginLeft: '8px', fontSize: '0.72rem', background: 'var(--color-brand)', color: '#fff', padding: '2px 6px', borderRadius: '10px' }}>
+                                    Target Date
+                                  </span>
+                                )}
+                              </td>
+                              <td>{d.orders_count} orders</td>
+                              <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--color-brand)' }}>
+                                ₱{Number(d.revenue).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                              <td style={{ textAlign: 'right', fontWeight: 700, color: '#16a34a' }}>
+                                ₱{Number(d.profit ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                              <td style={{ textAlign: 'center' }}>
+                                <span style={{ padding: '2px 8px', borderRadius: '12px', fontSize: '0.78rem', fontWeight: 700, background: 'rgba(22, 163, 74, 0.1)', color: '#16a34a' }}>
+                                  {(Number(d.profit_margin ?? 0)).toFixed(1)}%
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 3. Monthly Reports Only */}
+            {selectedPeriod === 'monthly' && (
+              <div className="pos-breakdown-card">
+                <h3 className="pos-breakdown-title">
+                  Daily Breakdown for {new Date(reportDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                </h3>
+                {reportData.daily_breakdown.length === 0 ? (
+                  <p style={{ color: 'var(--color-muted)', fontSize: '0.88rem' }}>No orders logged for this month yet.</p>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="admin-table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Total Orders</th>
+                          <th style={{ textAlign: 'right' }}>Revenue Gained</th>
+                          <th style={{ textAlign: 'right' }}>Profit Gained</th>
+                          <th style={{ textAlign: 'center' }}>Margin %</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reportData.daily_breakdown.map((d, i) => (
                           <tr key={i}>
-                            <td>{monthName}</td>
-                            <td>{m.orders_count} orders</td>
+                            <td>
+                              {new Date(d.sale_date).toLocaleDateString('en-US', {
+                                weekday: 'short',
+                                month: 'short',
+                                day: 'numeric',
+                              })}
+                            </td>
+                            <td>{d.orders_count} orders</td>
                             <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--color-brand)' }}>
-                              ₱{Number(m.revenue).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              ₱{Number(d.revenue).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                            <td style={{ textAlign: 'right', fontWeight: 700, color: '#16a34a' }}>
+                              ₱{Number(d.profit ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              <span style={{ padding: '2px 8px', borderRadius: '12px', fontSize: '0.78rem', fontWeight: 700, background: 'rgba(22, 163, 74, 0.1)', color: '#16a34a' }}>
+                                {(Number(d.profit_margin ?? 0)).toFixed(1)}%
+                              </span>
                             </td>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 4. Annually Reports Only */}
+            {selectedPeriod === 'annually' && (
+              <div className="pos-breakdown-card">
+                <h3 className="pos-breakdown-title">
+                  Monthly Revenue &amp; Profit Breakdown &bull; {new Date(reportDate).getFullYear()}
+                </h3>
+                {reportData.monthly_breakdown.length === 0 ? (
+                  <p style={{ color: 'var(--color-muted)', fontSize: '0.88rem' }}>No orders logged for this year yet.</p>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="admin-table">
+                      <thead>
+                        <tr>
+                          <th>Month</th>
+                          <th>Total Orders</th>
+                          <th style={{ textAlign: 'right' }}>Revenue Gained</th>
+                          <th style={{ textAlign: 'right' }}>Profit Gained</th>
+                          <th style={{ textAlign: 'center' }}>Margin %</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reportData.monthly_breakdown.map((m, i) => {
+                          const monthName = new Date(2026, m.sale_month - 1, 1).toLocaleDateString('en-US', {
+                            month: 'long',
+                          });
+                          return (
+                            <tr key={i}>
+                              <td>
+                                <strong>{monthName}</strong>
+                              </td>
+                              <td>{m.orders_count} orders</td>
+                              <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--color-brand)' }}>
+                                ₱{Number(m.revenue).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                              <td style={{ textAlign: 'right', fontWeight: 700, color: '#16a34a' }}>
+                                ₱{Number(m.profit ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                              <td style={{ textAlign: 'center' }}>
+                                <span style={{ padding: '2px 8px', borderRadius: '12px', fontSize: '0.78rem', fontWeight: 700, background: 'rgba(22, 163, 74, 0.1)', color: '#16a34a' }}>
+                                  {(Number(m.profit_margin ?? 0)).toFixed(1)}%
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </>
       ) : null}
 
-      {/* ── Category Top Products Drilldown Modal (Task 4) ── */}
+      {/* ── Category Top Products Drilldown Modal ── */}
       {drilldownCategory && (
         <div className="modal-overlay" onClick={() => setDrilldownCategory(null)}>
-          <div className="modal-card" style={{ maxWidth: '640px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-card" style={{ maxWidth: '480px' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <div>
                 <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-brand-mid)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Category Performance Drilldown &bull; {categoryTimeframe.toUpperCase()} VIEW
+                  Category Performance Drilldown &bull; {distributionDate}
                 </span>
                 <h3 className="modal-title" style={{ marginTop: '2px' }}>
                   Top Selling Products &bull; {drilldownCategory}
@@ -621,7 +976,7 @@ export default function AdminSalesReport() {
               {categoryTopProducts.length === 0 ? (
                 <div className="state-center" style={{ padding: '32px' }}>
                   <ShoppingBag size={36} className="state-icon" />
-                  <p className="state-sub">No sales registered for items in {drilldownCategory} during this period.</p>
+                  <p className="state-sub">No sales registered for items in {drilldownCategory} on {distributionDate}.</p>
                 </div>
               ) : (
                 <div style={{ overflowX: 'auto' }}>

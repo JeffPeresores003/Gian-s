@@ -8,6 +8,7 @@ import {
 import api, { getImageUrl } from '../lib/api';
 import { useToast } from '../contexts/ToastContext';
 import QRCode from '../lib/qrcode';
+import FlavorModal, { hasFlavors, cartKeyOf, displayName } from '../components/FlavorModal';
 
 /* ─── Step indicator ─────────────────────────────────────────── */
 const STEPS = ['Browse & Select', 'Your Info', 'Confirmation'];
@@ -41,6 +42,7 @@ export default function OrderingPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [cart, setCart] = useState([]);
+  const [flavorProduct, setFlavorProduct] = useState(null);
 
   // Step 1: Info
   const [fullName, setFullName] = useState('');
@@ -87,21 +89,29 @@ export default function OrderingPage() {
   }, [products, selectedCategory, searchQuery]);
 
   // ── Cart logic ──
-  const addToCart = (product) => {
+  const addToCart = (product, flavor = null) => {
+    const line = { ...product, flavor };
+    const key = cartKeyOf(line);
     setCart((prev) => {
-      const ex = prev.find((i) => i.id === product.id);
-      if (ex) return prev.map((i) => i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i);
-      return [...prev, { ...product, quantity: 1 }];
+      const ex = prev.find((i) => cartKeyOf(i) === key);
+      if (ex) return prev.map((i) => cartKeyOf(i) === key ? { ...i, quantity: i.quantity + 1 } : i);
+      return [...prev, { ...line, quantity: 1 }];
     });
   };
 
-  const updateQty = (id, delta) => {
+  // Flavored products ask for a flavor first
+  const handleAddClick = (product) => {
+    if (hasFlavors(product)) setFlavorProduct(product);
+    else addToCart(product);
+  };
+
+  const updateQty = (key, delta) => {
     setCart((prev) =>
-      prev.map((i) => i.id === id ? { ...i, quantity: Math.max(1, i.quantity + delta) } : i)
+      prev.map((i) => cartKeyOf(i) === key ? { ...i, quantity: Math.max(1, i.quantity + delta) } : i)
     );
   };
 
-  const removeFromCart = (id) => setCart((prev) => prev.filter((i) => i.id !== id));
+  const removeFromCart = (key) => setCart((prev) => prev.filter((i) => cartKeyOf(i) !== key));
 
   const cartSubtotal = useMemo(() => cart.reduce((s, i) => s + i.price * i.quantity, 0), [cart]);
   const cartTotal = useMemo(() => cartSubtotal, [cartSubtotal]);
@@ -136,6 +146,7 @@ export default function OrderingPage() {
         items: cart.map((i) => ({
           product_id: i.id,
           product_name: i.name,
+          flavor: i.flavor || null,
           unit_price: i.price,
           quantity: i.quantity,
         })),
@@ -298,9 +309,13 @@ export default function OrderingPage() {
             ) : (
               <div className="ordering-products-grid">
                 {filteredProducts.map((product) => {
-                  const inCart = cart.find((i) => i.id === product.id);
+                  const flavored = hasFlavors(product);
+                  const inCart = flavored ? null : cart.find((i) => i.id === product.id);
+                  const flavoredQty = flavored
+                    ? cart.filter((i) => i.id === product.id).reduce((s, i) => s + i.quantity, 0)
+                    : 0;
                   return (
-                    <div key={product.id} className={`ordering-product-card ${inCart ? 'in-cart' : ''}`}>
+                    <div key={product.id} className={`ordering-product-card ${inCart || flavoredQty ? 'in-cart' : ''}`}>
                       {product.image_url && (
                         <img
                           src={getImageUrl(product.image_url)}
@@ -318,13 +333,13 @@ export default function OrderingPage() {
                           <span className="ordering-product-price">₱{Number(product.price).toFixed(2)}</span>
                           {inCart ? (
                             <div className="ordering-qty-ctrl">
-                              <button onClick={() => updateQty(product.id, -1)}><Minus size={12} /></button>
+                              <button onClick={() => updateQty(cartKeyOf(inCart), -1)}><Minus size={12} /></button>
                               <span>{inCart.quantity}</span>
-                              <button onClick={() => updateQty(product.id, 1)}><Plus size={12} /></button>
+                              <button onClick={() => updateQty(cartKeyOf(inCart), 1)}><Plus size={12} /></button>
                             </div>
                           ) : (
-                            <button className="ordering-add-btn" onClick={() => addToCart(product)}>
-                              <Plus size={14} /> Add
+                            <button className="ordering-add-btn" onClick={() => handleAddClick(product)}>
+                              <Plus size={14} /> {flavored && flavoredQty > 0 ? `Add (${flavoredQty})` : 'Add'}
                             </button>
                           )}
                         </div>
@@ -354,16 +369,16 @@ export default function OrderingPage() {
               <>
                 <div className="ordering-cart-items">
                   {cart.map((item) => (
-                    <div key={item.id} className="ordering-cart-item">
+                    <div key={cartKeyOf(item)} className="ordering-cart-item">
                       <div className="ordering-cart-item-info">
-                        <span className="ordering-cart-item-name">{item.name}</span>
+                        <span className="ordering-cart-item-name">{displayName(item)}</span>
                         <span className="ordering-cart-item-price">₱{(item.price * item.quantity).toFixed(2)}</span>
                       </div>
                       <div className="ordering-cart-item-ctrl">
-                        <button onClick={() => updateQty(item.id, -1)}><Minus size={11} /></button>
+                        <button onClick={() => updateQty(cartKeyOf(item), -1)}><Minus size={11} /></button>
                         <span>{item.quantity}</span>
-                        <button onClick={() => updateQty(item.id, 1)}><Plus size={11} /></button>
-                        <button className="ordering-cart-remove" onClick={() => removeFromCart(item.id)}><Trash2 size={12} /></button>
+                        <button onClick={() => updateQty(cartKeyOf(item), 1)}><Plus size={11} /></button>
+                        <button className="ordering-cart-remove" onClick={() => removeFromCart(cartKeyOf(item))}><Trash2 size={12} /></button>
                       </div>
                     </div>
                   ))}
@@ -380,6 +395,17 @@ export default function OrderingPage() {
             )}
           </div>
         </div>
+      )}
+
+      {flavorProduct && (
+        <FlavorModal
+          product={flavorProduct}
+          onClose={() => setFlavorProduct(null)}
+          onSelect={(flavor) => {
+            addToCart(flavorProduct, flavor);
+            setFlavorProduct(null);
+          }}
+        />
       )}
 
       {/* ── STEP 1: Customer Info ── */}
@@ -431,8 +457,8 @@ export default function OrderingPage() {
             <div className="ordering-info-summary">
               <div className="ordering-info-summary-title">Order Summary</div>
               {cart.map((item) => (
-                <div key={item.id} className="ordering-info-summary-row">
-                  <span>{item.name} × {item.quantity}</span>
+                <div key={cartKeyOf(item)} className="ordering-info-summary-row">
+                  <span>{displayName(item)} × {item.quantity}</span>
                   <span>₱{(item.price * item.quantity).toFixed(2)}</span>
                 </div>
               ))}

@@ -28,18 +28,23 @@ import {
   Download,
   Upload,
   FileSpreadsheet,
+  CircleDollarSign,
 } from 'lucide-react';
 import AdminOrderManagement from '../components/AdminOrderManagement';
 import AdminSalesReport from '../components/AdminSalesReport';
+import AdminProfitsManagement from '../components/AdminProfitsManagement';
+import FlavorEditor from '../components/FlavorEditor';
 
 const INITIAL_PRODUCT_FORM = {
   id: null,
   name: '',
   description: '',
   price: '',
+  cost_price: '',
   category: 'Coffee',
   image_url: '',
   is_available: true,
+  flavors: [],
 };
 
 const INITIAL_STOCK_FORM = {
@@ -209,9 +214,11 @@ export default function AdminDashboardPage() {
       name: product.name,
       description: product.description || '',
       price: product.price,
+      cost_price: product.cost_price != null ? String(product.cost_price) : '',
       category: product.category,
       image_url: product.image_url || '',
       is_available: Boolean(product.is_available),
+      flavors: Array.isArray(product.flavors) ? product.flavors.map((f) => ({ ...f })) : [],
     });
     if (product.image_url) {
       setImagePreview(getImageUrl(product.image_url));
@@ -328,9 +335,11 @@ export default function AdminDashboardPage() {
         name: formData.name.trim(),
         description: formData.description.trim() || null,
         price: parseFloat(formData.price),
+        cost_price: formData.cost_price !== '' && formData.cost_price != null ? parseFloat(formData.cost_price) : 0,
         category: formData.category.trim(),
         image_url: resolvedImageUrl,
         is_available: Boolean(formData.is_available),
+        flavors: formData.flavors || [],
       };
 
       if (formData.id) {
@@ -666,6 +675,16 @@ export default function AdminDashboardPage() {
             <span className={`subnav-pill ${lowStockCount > 0 ? 'alert' : ''}`}>
               {stocks.length}
             </span>
+          </button>
+
+          <button
+            type="button"
+            className={`admin-subnav-btn ${activeTab === 'profits' ? 'active' : ''}`}
+            onClick={() => setActiveTab('profits')}
+            id="tab-profits"
+          >
+            <CircleDollarSign size={16} />
+            <span>Profits</span>
           </button>
 
           <button
@@ -1152,6 +1171,11 @@ export default function AdminDashboardPage() {
         </main>
       )}
 
+      {/* ─── TAB: PROFITS & MARGINS ──────────────────────────── */}
+      {activeTab === 'profits' && (
+        <AdminProfitsManagement products={products} onProductsUpdated={fetchProducts} />
+      )}
+
       {/* ─── TAB 3: ORDER HISTORY & OPERATIONS ──────────────── */}
       {activeTab === 'orders' && <AdminOrderManagement products={products} />}
 
@@ -1161,7 +1185,11 @@ export default function AdminDashboardPage() {
       {/* ─── ADD/EDIT MENU PRODUCT MODAL ─────────────────────── */}
       {isModalOpen && (
         <div className="modal-overlay" onClick={() => !saving && setIsModalOpen(false)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="modal-card"
+            style={{ maxWidth: '460px', width: '100%', margin: '0 auto', padding: '24px 22px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="modal-header">
               <h2 className="modal-title">{formData.id ? 'Edit Product' : 'Add New Product'}</h2>
               <button
@@ -1216,7 +1244,7 @@ export default function AdminDashboardPage() {
 
                 <div className="form-group">
                   <label className="form-label" htmlFor="product-price-input">
-                    Price (₱) *
+                    Selling Price (₱) *
                   </label>
                   <input
                     id="product-price-input"
@@ -1233,6 +1261,66 @@ export default function AdminDashboardPage() {
                 </div>
               </div>
 
+              {/* Cost Price per item & Calculated Profit */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', alignItems: 'flex-start', marginBottom: '14px' }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label" htmlFor="product-cost-input">
+                    Cost per Item (Capital ₱)
+                  </label>
+                  <input
+                    id="product-cost-input"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    className="form-input"
+                    placeholder="e.g. 60.00"
+                    value={formData.cost_price}
+                    onChange={(e) => setFormData({ ...formData, cost_price: e.target.value })}
+                  />
+                  <span style={{ fontSize: '0.72rem', color: 'var(--color-muted)', display: 'block', marginTop: '3px' }}>
+                    Used for profit tracking
+                  </span>
+                </div>
+
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label" style={{ color: 'var(--color-muted)' }}>
+                    Calculated Profit
+                  </label>
+                  <div
+                    style={{
+                      padding: '8px 10px',
+                      borderRadius: 'var(--radius-sm)',
+                      background: 'var(--color-cream)',
+                      border: '1px solid var(--color-border)',
+                      fontSize: '0.85rem',
+                      fontWeight: 700,
+                      color:
+                        (parseFloat(formData.price) || 0) - (parseFloat(formData.cost_price) || 0) >= 0
+                          ? '#16a34a'
+                          : '#dc2626',
+                      minHeight: '38px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <div>
+                      ₱{((parseFloat(formData.price) || 0) - (parseFloat(formData.cost_price) || 0)).toFixed(2)} gain
+                    </div>
+                    {parseFloat(formData.price) > 0 && (
+                      <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', fontWeight: 600 }}>
+                        {(
+                          (((parseFloat(formData.price) || 0) - (parseFloat(formData.cost_price) || 0)) /
+                            parseFloat(formData.price)) *
+                          100
+                        ).toFixed(1)}
+                        % margin
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               <div className="form-group">
                 <label className="form-label" htmlFor="product-desc-input">
                   Description
@@ -1246,6 +1334,11 @@ export default function AdminDashboardPage() {
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 />
               </div>
+
+              <FlavorEditor
+                value={formData.flavors || []}
+                onChange={(flavors) => setFormData((prev) => ({ ...prev, flavors }))}
+              />
 
               {/* Image Upload Zone */}
               <div className="form-group">
@@ -1452,7 +1545,11 @@ export default function AdminDashboardPage() {
       {/* ─── ADD/EDIT RAW STOCK ITEM MODAL ───────────────────── */}
       {isStockModalOpen && (
         <div className="modal-overlay" onClick={() => !stockSaving && setIsStockModalOpen(false)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="modal-card"
+            style={{ maxWidth: '460px', width: '100%', margin: '0 auto', padding: '24px 22px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="modal-header">
               <h2 className="modal-title">
                 {stockFormData.id ? 'Edit Stock Supply' : 'Add Raw Stock Supply'}
