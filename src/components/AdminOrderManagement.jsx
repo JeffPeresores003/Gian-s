@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useToast } from '../contexts/ToastContext';
 import api from '../lib/api';
 import printReceiptSlip from '../lib/printReceipt';
+import './AdminOrderManagement.css';
 import {
   Search,
   Calendar,
@@ -69,6 +70,11 @@ export default function AdminOrderManagement({ products = [] }) {
 
   // Receipt Modal
   const [receiptOrder, setReceiptOrder] = useState(null);
+
+  // Delete Order Modal
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   // ---------- Fetch Admin Orders ----------
   const fetchOrders = async () => {
@@ -374,14 +380,39 @@ export default function AdminOrderManagement({ products = [] }) {
     }
   };
 
+  // ---------- Delete Order (e.g. accidental duplicate punch) ----------
+  const openDelete = (ord) => {
+    setDeleteTarget(ord);
+    setDeleteReason('');
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      const res = await api.delete(`/admin/orders/${deleteTarget.id}`, {
+        data: { reason: deleteReason.trim() },
+      });
+      addToast(res.data?.message || 'Order deleted.', 'success');
+      setDeleteTarget(null);
+      setEditOrder(null);
+      setViewOrder(null);
+      fetchOrders();
+    } catch (err) {
+      addToast(err.response?.data?.message || 'Failed to delete order.', 'error');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <main className="admin-content">
       {/* ── Top Header ────────────────────────────────────── */}
-      <div className="admin-top">
+      <div className="pos-history-top" style={{ flexWrap: 'wrap', gap: '16px' }}>
         <div>
-          <h1 className="admin-page-title">Order History &amp; Admin Operations</h1>
-          <p className="admin-page-sub">
-            Review orders, edit items/quantities, apply missed promo discounts, issue refunds, and track the audit log.
+          <h1 className="pos-section-title">Order History</h1>
+          <p className="pos-section-sub">
+            Inspect past orders, customer payments, and receipts — edit, refund, or delete orders as admin.
           </p>
         </div>
 
@@ -467,7 +498,7 @@ export default function AdminOrderManagement({ products = [] }) {
       </div>
 
       {/* ── Search & Pill Filters Row ──────────────────────── */}
-      <div className="admin-search-wrap">
+      <div className="pos-history-search-row" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
         <div className="search-wrap" style={{ flex: 2, minWidth: '240px' }}>
           <Search className="search-icon" size={16} />
           <input
@@ -535,7 +566,6 @@ export default function AdminOrderManagement({ products = [] }) {
                 <th>Payment</th>
                 <th>Change</th>
                 <th>Cashier</th>
-                <th>Status</th>
                 <th style={{ textAlign: 'right' }}>Action</th>
               </tr>
             </thead>
@@ -550,6 +580,7 @@ export default function AdminOrderManagement({ products = [] }) {
                 const hasRefund = Number(ord.refund_amount) > 0;
                 const netAmount = Math.max(0, Number(ord.total_amount) - (Number(ord.refund_amount) || 0));
                 const isEdited = Boolean(ord.edited_at);
+                const isSaleStatus = ord.status === 'completed' || ord.status === 'delivered';
 
                 return (
                   <tr key={ord.id}>
@@ -558,6 +589,18 @@ export default function AdminOrderManagement({ products = [] }) {
                         <span style={{ fontWeight: 600, fontFamily: 'monospace', color: 'var(--color-brand)' }}>
                           {ord.order_number}
                         </span>
+                        {!isSaleStatus && (
+                          <span
+                            style={{
+                              fontSize: '0.68rem',
+                              fontWeight: 700,
+                              textTransform: 'capitalize',
+                              color: ord.status === 'refunded' ? '#DC2626' : ord.status === 'cancelled' ? '#6B7280' : '#D97706',
+                            }}
+                          >
+                            {ord.status}
+                          </span>
+                        )}
                         {isEdited && (
                           <span style={{ fontSize: '0.68rem', color: '#D97706', fontWeight: 600 }}>
                             ✎ Edited by {ord.edited_by || 'Admin'}
@@ -571,12 +614,7 @@ export default function AdminOrderManagement({ products = [] }) {
                         <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)' }}>{dateStr}</div>
                       )}
                     </td>
-                    <td>
-                      <div style={{ fontWeight: 600 }}>{ord.customer_name || 'Guest'}</div>
-                      {ord.contact_number && (
-                        <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)' }}>{ord.contact_number}</div>
-                      )}
-                    </td>
+                    <td>{ord.customer_name || 'Guest'}</td>
                     <td>
                       <span className={`pos-badge-type ${ord.order_type}`}>
                         {ord.order_type === 'dine-in'
@@ -612,40 +650,8 @@ export default function AdminOrderManagement({ products = [] }) {
                         <div style={{ fontSize: '0.72rem', color: 'var(--color-brand-mid)' }}>Rider: {ord.rider_name}</div>
                       )}
                     </td>
-                    <td>
-                      <span
-                        className="badge"
-                        style={{
-                          background:
-                            ord.status === 'completed' || ord.status === 'delivered'
-                              ? 'rgba(22, 163, 74, 0.12)'
-                              : ord.status === 'refunded'
-                              ? 'rgba(220, 38, 38, 0.12)'
-                              : ord.status === 'cancelled'
-                              ? 'rgba(156, 163, 175, 0.2)'
-                              : 'rgba(217, 119, 6, 0.12)',
-                          color:
-                            ord.status === 'completed' || ord.status === 'delivered'
-                              ? '#16a34a'
-                              : ord.status === 'refunded'
-                              ? '#dc2626'
-                              : ord.status === 'cancelled'
-                              ? '#6b7280'
-                              : '#d97706',
-                        }}
-                      >
-                        {ord.status === 'completed'
-                          ? 'Completed'
-                          : ord.status === 'delivered'
-                          ? 'Delivered'
-                          : ord.status === 'refunded'
-                          ? 'Refunded'
-                          : ord.status}
-                      </span>
-                    </td>
                     <td style={{ textAlign: 'right' }}>
-                      <div style={{ display: 'inline-flex', gap: '5px', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                        {/* Receipt Button */}
+                      <div className="aom-row-actions">
                         <button
                           type="button"
                           className="btn-receipt-view"
@@ -657,7 +663,6 @@ export default function AdminOrderManagement({ products = [] }) {
                           <span>Receipt</span>
                         </button>
 
-                        {/* Edit Order (Admin only) */}
                         {!['cancelled', 'refunded'].includes(ord.status) && (
                           <button
                             type="button"
@@ -672,8 +677,7 @@ export default function AdminOrderManagement({ products = [] }) {
                           </button>
                         )}
 
-                        {/* Refund / Missed Discount (Admin only) */}
-                        {(ord.status === 'completed' || ord.status === 'delivered') && netAmount > 0 && (
+                        {isSaleStatus && netAmount > 0 && (
                           <button
                             type="button"
                             className="btn-receipt-view"
@@ -687,7 +691,6 @@ export default function AdminOrderManagement({ products = [] }) {
                           </button>
                         )}
 
-                        {/* View / Audit Trail */}
                         <button
                           type="button"
                           className="btn-receipt-view"
@@ -698,6 +701,17 @@ export default function AdminOrderManagement({ products = [] }) {
                         >
                           <Eye size={13} />
                           <span>View</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          className="btn-receipt-view aom-row-delete"
+                          onClick={() => openDelete(ord)}
+                          id={`delete-btn-${ord.id}`}
+                          title="Delete this order permanently"
+                        >
+                          <Trash2 size={13} />
+                          <span>Delete</span>
                         </button>
                       </div>
                     </td>
@@ -711,74 +725,126 @@ export default function AdminOrderManagement({ products = [] }) {
 
       {/* ── MODAL 1: EDIT ORDER (Admin unique function) ─────── */}
       {editOrder && (
-        <div className="modal-overlay" onClick={() => setEditOrder(null)}>
-          <div className="modal-card" style={{ maxWidth: '480px' }} onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <div>
-                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-brand-mid)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Admin Order Correction
-                </span>
-                <h3 className="modal-title" style={{ marginTop: '2px' }}>
-                  Edit Order &bull; {editOrder.order_number}
-                </h3>
+        <div className="modal-overlay" onClick={() => !savingEdit && setEditOrder(null)}>
+          <div className="modal-card aom-modal" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="aom-header">
+              <div className="aom-header-icon">
+                <Edit2 size={20} />
               </div>
-              <button type="button" className="btn-icon" onClick={() => setEditOrder(null)}>
+              <div className="aom-header-text">
+                <span className="aom-eyebrow">Admin Order Correction</span>
+                <h3 className="aom-title">
+                  Edit Order <span className="aom-title-no">{editOrder.order_number}</span>
+                </h3>
+                <div className="aom-chips">
+                  <span className={`pos-badge-type ${editOrder.order_type}`}>
+                    {editOrder.order_type === 'dine-in'
+                      ? 'Dine In'
+                      : editOrder.order_type === 'online'
+                      ? 'Online'
+                      : 'Take Out'}
+                  </span>
+                  <span className="aom-chip">
+                    <Clock size={12} />
+                    {new Date(editOrder.created_at).toLocaleString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                  <span className="aom-chip aom-chip-strong">Original ₱{Number(editOrder.total_amount).toFixed(2)}</span>
+                </div>
+              </div>
+              <button type="button" className="btn-icon" onClick={() => setEditOrder(null)} title="Close">
                 <X size={20} />
               </button>
             </div>
 
-            <form onSubmit={handleSaveEditSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {/* Order Info Row */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '12px' }}>
-                <div>
-                  <label className="form-label">Customer Name</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={editCustomerName}
-                    onChange={(e) => setEditCustomerName(e.target.value)}
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="form-label">Order Type</label>
-                  <select
-                    className="form-input"
-                    value={editOrderType}
-                    onChange={(e) => setEditOrderType(e.target.value)}
-                    disabled={editOrder.order_type === 'online'}
-                  >
-                    <option value="dine-in">Dine In</option>
-                    <option value="take-out">Take Out</option>
-                    {editOrder.order_type === 'online' && <option value="online">Online Delivery</option>}
-                  </select>
-                </div>
-                <div>
-                  <label className="form-label">Payment Method</label>
-                  <select
-                    className="form-input"
-                    value={editPaymentMethod}
-                    onChange={(e) => setEditPaymentMethod(e.target.value)}
-                  >
-                    <option value="cash">Cash</option>
-                    <option value="gcash">GCash / QR</option>
-                    <option value="card">Card</option>
-                  </select>
-                </div>
-              </div>
+            <form onSubmit={handleSaveEditSubmit} className="aom-form">
+              <div className="aom-body">
+                {/* Section: Customer & Payment */}
+                <section className="aom-section">
+                  <div className="aom-section-head">
+                    <User size={15} />
+                    <h4>Customer &amp; Payment</h4>
+                  </div>
+                  <div className="aom-grid">
+                    <div className="aom-field">
+                      <label className="aom-label">Customer Name</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={editCustomerName}
+                        onChange={(e) => setEditCustomerName(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="aom-field">
+                      <label className="aom-label">Order Type</label>
+                      <select
+                        className="form-input"
+                        value={editOrderType}
+                        onChange={(e) => setEditOrderType(e.target.value)}
+                        disabled={editOrder.order_type === 'online'}
+                      >
+                        <option value="dine-in">Dine In</option>
+                        <option value="take-out">Take Out</option>
+                        {editOrder.order_type === 'online' && <option value="online">Online Delivery</option>}
+                      </select>
+                    </div>
+                    <div className="aom-field">
+                      <label className="aom-label">Payment Method</label>
+                      <div className="aom-seg">
+                        {[
+                          { v: 'cash', label: 'Cash', Icon: Banknote },
+                          { v: 'gcash', label: 'GCash', Icon: Smartphone },
+                          { v: 'card', label: 'Card', Icon: CreditCard },
+                        ].map(({ v, label, Icon }) => (
+                          <button
+                            key={v}
+                            type="button"
+                            className={`aom-seg-btn ${editPaymentMethod === v ? 'active' : ''}`}
+                            onClick={() => setEditPaymentMethod(v)}
+                          >
+                            <Icon size={14} /> {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {editPaymentMethod === 'cash' && (
+                      <div className="aom-field">
+                        <label className="aom-label">Cash Tendered (₱)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          className="form-input"
+                          value={editAmountPaid}
+                          onChange={(e) => setEditAmountPaid(e.target.value)}
+                          placeholder={editTotalAmount.toFixed(2)}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </section>
 
-              {/* Order Items Table */}
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <label className="form-label" style={{ margin: 0 }}>Order Line Items</label>
-                  <div style={{ display: 'flex', gap: '8px' }}>
+                {/* Section: Items */}
+                <section className="aom-section">
+                  <div className="aom-section-head">
+                    <ShoppingBag size={15} />
+                    <h4>Order Items</h4>
+                    <span className="aom-count">{editItems.length}</span>
+                  </div>
+
+                  <div className="aom-add-row">
                     <select
                       className="form-input"
-                      style={{ padding: '4px 8px', fontSize: '0.8rem', minWidth: '180px' }}
                       value={selectedCatalogProduct}
                       onChange={(e) => setSelectedCatalogProduct(e.target.value)}
                     >
-                      <option value="">+ Add Product from Catalog...</option>
+                      <option value="">Add a product from the catalog…</option>
                       {products.map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.name} (₱{Number(p.price).toFixed(2)})
@@ -787,228 +853,254 @@ export default function AdminOrderManagement({ products = [] }) {
                     </select>
                     <button
                       type="button"
-                      className="btn-add"
-                      style={{ padding: '4px 10px', fontSize: '0.8rem' }}
+                      className="btn-add aom-add-btn"
                       onClick={handleAddCatalogItem}
                       disabled={!selectedCatalogProduct}
                     >
                       <Plus size={14} /> Add
                     </button>
                   </div>
-                </div>
 
-                <div style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
-                  <table className="admin-table" style={{ margin: 0 }}>
-                    <thead>
-                      <tr>
-                        <th>Item</th>
-                        <th style={{ width: '100px' }}>Unit Price (₱)</th>
-                        <th style={{ width: '110px', textAlign: 'center' }}>Qty</th>
-                        <th style={{ width: '90px', textAlign: 'right' }}>Subtotal</th>
-                        <th style={{ width: '40px' }}></th>
-                      </tr>
-                    </thead>
-                    <tbody>
+                  {editItems.length === 0 ? (
+                    <div className="aom-empty">No items left — add at least one product to save.</div>
+                  ) : (
+                    <div className="aom-items">
                       {editItems.map((item, idx) => (
-                        <tr key={idx}>
-                          <td>
+                        <div className="aom-item" key={idx}>
+                          <div className="aom-item-name">
                             <strong>{item.product_name}</strong>
-                          </td>
-                          <td>
+                            {item.is_updated && <span className="aom-new-tag">updated</span>}
+                          </div>
+                          <div className="aom-price">
+                            <span>₱</span>
                             <input
                               type="number"
                               step="0.01"
                               min="0"
-                              className="form-input"
-                              style={{ padding: '3px 6px', fontSize: '0.82rem' }}
                               value={item.unit_price}
                               onChange={(e) => handleUpdateItemPrice(idx, e.target.value)}
+                              aria-label={`Unit price for ${item.product_name}`}
                             />
-                          </td>
-                          <td>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
-                              <button
-                                type="button"
-                                className="btn-icon"
-                                style={{ width: '22px', height: '22px' }}
-                                onClick={() => handleUpdateItemQty(idx, -1)}
-                              >
-                                -
-                              </button>
-                              <span style={{ fontWeight: 600, minWidth: '20px', textAlign: 'center' }}>
-                                {item.quantity}
-                              </span>
-                              <button
-                                type="button"
-                                className="btn-icon"
-                                style={{ width: '22px', height: '22px' }}
-                                onClick={() => handleUpdateItemQty(idx, 1)}
-                              >
-                                +
-                              </button>
-                            </div>
-                          </td>
-                          <td style={{ textAlign: 'right', fontWeight: 700 }}>
-                            ₱{(item.unit_price * item.quantity).toFixed(2)}
-                          </td>
-                          <td>
-                            <button
-                              type="button"
-                              className="btn-icon"
-                              style={{ width: '26px', height: '26px', color: '#DC2626' }}
-                              onClick={() => handleRemoveItem(idx)}
-                              title="Remove item"
-                            >
-                              <Trash2 size={13} />
+                          </div>
+                          <div className="aom-stepper">
+                            <button type="button" onClick={() => handleUpdateItemQty(idx, -1)} aria-label="Decrease quantity">
+                              −
                             </button>
-                          </td>
-                        </tr>
+                            <span>{item.quantity}</span>
+                            <button type="button" onClick={() => handleUpdateItemQty(idx, 1)} aria-label="Increase quantity">
+                              +
+                            </button>
+                          </div>
+                          <div className="aom-line-total">₱{(item.unit_price * item.quantity).toFixed(2)}</div>
+                          <button
+                            type="button"
+                            className="aom-remove"
+                            onClick={() => handleRemoveItem(idx)}
+                            title="Remove item"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       ))}
-                    </tbody>
-                  </table>
-                </div>
+                    </div>
+                  )}
+                </section>
+
+                {/* Section: Discount */}
+                <section className="aom-section">
+                  <div className="aom-section-head">
+                    <Tag size={15} />
+                    <h4>Discount / Promo</h4>
+                    {editDiscount.active && <span className="aom-discount-amt">−₱{editDiscountAmount.toFixed(2)}</span>}
+                    <label className="aom-switch" title="Toggle discount">
+                      <input
+                        type="checkbox"
+                        checked={editDiscount.active}
+                        onChange={() => setEditDiscount((d) => ({ ...d, active: !d.active }))}
+                      />
+                      <span className="aom-switch-track" />
+                    </label>
+                  </div>
+
+                  {editDiscount.active && (
+                    <div className="aom-discount-body">
+                      <div className="aom-presets">
+                        {[
+                          { type: 'percent', value: '20', name: '20% Senior / PWD' },
+                          { type: 'percent', value: '10', name: '10% Promo OFF' },
+                          { type: 'fixed', value: '100', name: '₱100 Flat OFF' },
+                          { type: 'fixed', value: '50', name: '₱50 Flat OFF' },
+                        ].map((pre) => {
+                          const on = String(editDiscount.value) === pre.value && editDiscount.type === pre.type;
+                          return (
+                            <button
+                              key={pre.name}
+                              type="button"
+                              className={`aom-preset ${on ? 'active' : ''}`}
+                              onClick={() => setEditDiscount({ active: true, type: pre.type, value: pre.value, name: pre.name })}
+                            >
+                              {pre.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="aom-grid aom-grid-3">
+                        <div className="aom-field">
+                          <label className="aom-label">Mode</label>
+                          <select
+                            className="form-input"
+                            value={editDiscount.type}
+                            onChange={(e) => setEditDiscount({ ...editDiscount, type: e.target.value })}
+                          >
+                            <option value="percent">Percent (%)</option>
+                            <option value="fixed">Fixed (₱)</option>
+                          </select>
+                        </div>
+                        <div className="aom-field">
+                          <label className="aom-label">Value ({editDiscount.type === 'percent' ? '%' : '₱'})</label>
+                          <input
+                            type="number"
+                            step="any"
+                            min="0"
+                            className="form-input"
+                            value={editDiscount.value}
+                            onChange={(e) => setEditDiscount({ ...editDiscount, value: e.target.value })}
+                          />
+                        </div>
+                        <div className="aom-field">
+                          <label className="aom-label">Promo Label</label>
+                          <input
+                            type="text"
+                            className="form-input"
+                            placeholder="e.g. 20% Senior"
+                            value={editDiscount.name}
+                            onChange={(e) => setEditDiscount({ ...editDiscount, name: e.target.value })}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </section>
+
+                {/* Section: Notes & Reason */}
+                <section className="aom-section aom-section-warn">
+                  <div className="aom-section-head">
+                    <ShieldCheck size={15} />
+                    <h4>Audit Trail</h4>
+                  </div>
+                  <div className="aom-field">
+                    <label className="aom-label">Order Notes (optional)</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={editNotes}
+                      onChange={(e) => setEditNotes(e.target.value)}
+                      placeholder="Special instructions…"
+                    />
+                  </div>
+                  <div className="aom-field" style={{ marginTop: 10 }}>
+                    <label className="aom-label aom-label-required">Reason for modification *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="e.g., Customer wanted iced instead of hot; wrong item punched"
+                      value={editReason}
+                      onChange={(e) => setEditReason(e.target.value)}
+                      required
+                    />
+                  </div>
+                </section>
               </div>
 
-              {/* Discount Section */}
-              <div style={{ background: 'var(--color-cream)', padding: '14px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: editDiscount.active ? '10px' : '0' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Tag size={16} color="var(--color-brand)" />
-                    <span style={{ fontWeight: 700, fontSize: '0.88rem' }}>Order Discount / Promo</span>
-                    {editDiscount.active && (
-                      <span style={{ fontSize: '0.85rem', fontWeight: 800, color: '#16A34A', marginLeft: '6px' }}>
-                        -₱{editDiscountAmount.toFixed(2)}
-                      </span>
+              {/* Sticky footer: totals + actions */}
+              <div className="aom-footer">
+                <div className="aom-totals">
+                  <div className="aom-totals-lines">
+                    <span>Subtotal ₱{editSubtotal.toFixed(2)}</span>
+                    {editDiscountAmount > 0 && <span className="aom-green">Discount −₱{editDiscountAmount.toFixed(2)}</span>}
+                    {editDeliveryFee > 0 && <span>Delivery ₱{editDeliveryFee.toFixed(2)}</span>}
+                  </div>
+                  <div className="aom-totals-main">
+                    <span>New Total</span>
+                    <strong>₱{editTotalAmount.toFixed(2)}</strong>
+                    {Math.abs(editTotalAmount - Number(editOrder.total_amount)) > 0.001 && (
+                      <em className={editTotalAmount > Number(editOrder.total_amount) ? 'up' : 'down'}>
+                        {editTotalAmount > Number(editOrder.total_amount) ? '+' : '−'}₱
+                        {Math.abs(editTotalAmount - Number(editOrder.total_amount)).toFixed(2)}
+                      </em>
                     )}
                   </div>
+                </div>
+                <div className="aom-actions">
                   <button
                     type="button"
-                    className="btn-pos-aux"
-                    style={{ padding: '4px 10px', fontSize: '0.78rem' }}
-                    onClick={() => setEditDiscount((d) => ({ ...d, active: !d.active }))}
+                    className="aom-btn-delete"
+                    onClick={() => openDelete(editOrder)}
+                    disabled={savingEdit}
+                    title="Permanently delete this order (e.g. duplicate punch)"
                   >
-                    {editDiscount.active ? 'Remove Discount' : '+ Apply Discount'}
+                    <Trash2 size={14} /> Delete Order
                   </button>
-                </div>
-
-                {editDiscount.active && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    {/* Quick Presets */}
-                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                      {[
-                        { type: 'percent', value: '20', name: '20% Senior / PWD' },
-                        { type: 'percent', value: '10', name: '10% Promo OFF' },
-                        { type: 'fixed', value: '100', name: '₱100 Flat OFF' },
-                        { type: 'fixed', value: '50', name: '₱50 Flat OFF' },
-                      ].map((pre, i) => (
-                        <button
-                          key={i}
-                          type="button"
-                          className="btn-pos-aux"
-                          style={{
-                            fontSize: '0.75rem',
-                            padding: '3px 8px',
-                            background: String(editDiscount.value) === String(pre.value) && editDiscount.type === pre.type ? 'var(--color-brand)' : '#fff',
-                            color: String(editDiscount.value) === String(pre.value) && editDiscount.type === pre.type ? '#fff' : 'var(--color-brand)',
-                          }}
-                          onClick={() => setEditDiscount({ active: true, type: pre.type, value: pre.value, name: pre.name })}
-                        >
-                          {pre.name}
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* Manual Inputs */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '120px 120px 1fr', gap: '8px' }}>
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--color-muted)', marginBottom: '3px' }}>Mode</label>
-                        <select
-                          className="form-input"
-                          style={{ padding: '6px 8px', fontSize: '0.82rem' }}
-                          value={editDiscount.type}
-                          onChange={(e) => setEditDiscount({ ...editDiscount, type: e.target.value })}
-                        >
-                          <option value="percent">Percent (%)</option>
-                          <option value="fixed">Fixed Flat (₱)</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--color-muted)', marginBottom: '3px' }}>Value ({editDiscount.type === 'percent' ? '%' : '₱'})</label>
-                        <input
-                          type="number"
-                          step="any"
-                          min="0"
-                          className="form-input"
-                          style={{ padding: '6px 8px', fontSize: '0.82rem', fontWeight: 700 }}
-                          value={editDiscount.value}
-                          onChange={(e) => setEditDiscount({ ...editDiscount, value: e.target.value })}
-                          placeholder={editDiscount.type === 'percent' ? 'e.g. 15' : 'e.g. 100'}
-                        />
-                      </div>
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--color-muted)', marginBottom: '3px' }}>Promo Label</label>
-                        <input
-                          type="text"
-                          className="form-input"
-                          style={{ padding: '6px 8px', fontSize: '0.82rem' }}
-                          placeholder="e.g. 20% Senior, ₱100 Promo"
-                          value={editDiscount.name}
-                          onChange={(e) => setEditDiscount({ ...editDiscount, name: e.target.value })}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Totals Summary */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '20px', alignItems: 'center', borderTop: '1px solid var(--color-border)', paddingTop: '12px' }}>
-                <div style={{ textAlign: 'right', fontSize: '0.88rem' }}>
-                  <div>Subtotal: ₱{editSubtotal.toFixed(2)}</div>
-                  {editDiscountAmount > 0 && (
-                    <div style={{ color: '#16A34A', fontWeight: 600 }}>Discount: -₱{editDiscountAmount.toFixed(2)}</div>
-                  )}
-                  {editDeliveryFee > 0 && <div>Delivery Fee: ₱{editDeliveryFee.toFixed(2)}</div>}
-                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--color-brand)', marginTop: '4px' }}>
-                    New Total: ₱{editTotalAmount.toFixed(2)}
+                  <div className="aom-actions-right">
+                    <button type="button" className="btn-cancel" onClick={() => setEditOrder(null)} disabled={savingEdit}>
+                      Cancel
+                    </button>
+                    <button type="submit" className="btn-save" disabled={savingEdit}>
+                      {savingEdit ? 'Saving…' : 'Save Changes'}
+                    </button>
                   </div>
                 </div>
-              </div>
-
-              {/* Audit Reason (Mandatory) */}
-              <div>
-                <label className="form-label" style={{ color: '#B45309' }}>
-                  Audit Reason for Modification (Required) *
-                </label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="e.g., Customer requested iced instead of hot, corrected wrong item placed at counter"
-                  value={editReason}
-                  onChange={(e) => setEditReason(e.target.value)}
-                  required
-                />
-              </div>
-
-              {/* Modal Buttons */}
-              <div className="modal-actions" style={{ marginTop: '12px' }}>
-                <button
-                  type="button"
-                  className="btn-cancel"
-                  onClick={() => setEditOrder(null)}
-                  disabled={savingEdit}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="btn-save"
-                  disabled={savingEdit}
-                >
-                  {savingEdit ? 'Saving Changes...' : 'Save & Update Order'}
-                </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: DELETE ORDER CONFIRMATION ─────────────────── */}
+      {deleteTarget && (
+        <div className="modal-overlay" style={{ zIndex: 260 }} onClick={() => !deleting && setDeleteTarget(null)}>
+          <div className="modal-card aom-delete-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="aom-delete-icon">
+              <AlertCircle size={28} />
+            </div>
+            <h3 className="aom-delete-title">Delete order {deleteTarget.order_number}?</h3>
+            <p className="aom-delete-text">
+              This permanently removes the order and its items. It will disappear from the cashier&apos;s order history
+              and the sales reports. This cannot be undone.
+            </p>
+            <div className="aom-delete-summary">
+              <div>
+                <span>Customer</span>
+                <strong>{deleteTarget.customer_name || 'Guest'}</strong>
+              </div>
+              <div>
+                <span>Total</span>
+                <strong>₱{Number(deleteTarget.total_amount).toFixed(2)}</strong>
+              </div>
+              <div>
+                <span>Status</span>
+                <strong style={{ textTransform: 'capitalize' }}>{deleteTarget.status}</strong>
+              </div>
+            </div>
+            <label className="aom-label" style={{ display: 'block', marginBottom: 6 }}>
+              Reason (optional)
+            </label>
+            <input
+              type="text"
+              className="form-input"
+              placeholder="e.g., Duplicate punch"
+              value={deleteReason}
+              onChange={(e) => setDeleteReason(e.target.value)}
+              autoFocus
+            />
+            <div className="modal-actions">
+              <button type="button" className="btn-cancel" onClick={() => setDeleteTarget(null)} disabled={deleting}>
+                Keep Order
+              </button>
+              <button type="button" className="aom-btn-delete solid" onClick={handleConfirmDelete} disabled={deleting}>
+                <Trash2 size={14} /> {deleting ? 'Deleting…' : 'Yes, Delete Order'}
+              </button>
+            </div>
           </div>
         </div>
       )}
